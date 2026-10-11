@@ -179,6 +179,8 @@ FADE_IN_SECONDS = 1.0
 FADE_OUT_SECONDS = 2.0
 STREAM_CHUNK_BYTES = 10 * 1024 * 1024
 STREAM_READ_BYTES = 64 * 1024
+# YouTube's servers sometimes accept the connection and never answer: give up on that try quickly and ask again
+STREAM_RESPONSE_TIMEOUT = 5
 
 
 def friendlyStreamError(message):
@@ -281,7 +283,7 @@ class _Decoder(threading.Thread):
                 request = urllib.request.Request(
                     self.path, headers={**self.headers, "Range": f"bytes={position}-{position + STREAM_CHUNK_BYTES - 1}"})
                 try:
-                    response = urllib.request.urlopen(request, timeout=20)
+                    response = urllib.request.urlopen(request, timeout=STREAM_RESPONSE_TIMEOUT)
                 except urllib.error.HTTPError as error:
                     if error.code == 416:
                         return
@@ -296,7 +298,9 @@ class _Decoder(threading.Thread):
                     if failures > 4:
                         self.feedError = str(error)
                         return
-                    time.sleep(0.6 * failures)
+                    print(f"[Audio] YouTube non risponde ({error}), riprovo")
+                    if "timed out" not in str(error):
+                        time.sleep(0.6 * failures)
                     continue
                 received = 0
                 with response:

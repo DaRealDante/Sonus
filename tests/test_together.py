@@ -255,3 +255,22 @@ def test_delayDoesNotPauseTheRoomAtSongStart(localBroker, toneUrl, fakeSoundCard
     assert not any("pausa" in notice for notice in alice.notices)
     assert waitFor(lambda: bruno.player.isPlaying() and bruno.player.currentSong()["title"] == "Inizio 1", 8)
     shutdown(alice, bruno)
+
+
+def test_pauseNobodyClickedIsNotSentToTheRoom(localBroker, toneUrl, fakeSoundCard):
+    """A pause caused by the app (loading, error...) and not by a click must not pause everybody."""
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    songIds = [alice.database.addStreamSong("https://youtu.be/fffffffffff", "Sola", "X", "", 90, None)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.isPlaying(), 15)
+    pump(3)
+    bruno.player.mediaPlayer.pause()
+    pump(3)
+    assert alice.player.isPlaying() and alice.controller.state["playing"]
+    assert not any("pausa" in notice for notice in alice.notices)
+    assert waitFor(lambda: bruno.player.isPlaying(), 5)
+    bruno.player.pause()
+    assert waitFor(lambda: not alice.player.isPlaying(), 8)
+    shutdown(alice, bruno)

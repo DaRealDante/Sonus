@@ -160,6 +160,7 @@ def test_playAfterFailedStartupResolveRetries(application, httpAudio):
 class RangeHandler(http.server.BaseHTTPRequestHandler):
     payload = b""
     requests = []
+    stalled = False
 
     def log_message(self, *args):
         pass
@@ -171,6 +172,10 @@ class RangeHandler(http.server.BaseHTTPRequestHandler):
             return
         rangeHeader = self.headers.get("Range")
         RangeHandler.requests.append(rangeHeader)
+        if self.path.startswith("/stall") and not RangeHandler.stalled:
+            RangeHandler.stalled = True
+            time.sleep(25)
+            return
         if self.path.startswith("/breaking") and rangeHeader and not rangeHeader.startswith("bytes=0-"):
             self.send_response(403)
             self.end_headers()
@@ -327,3 +332,17 @@ def test_searchedSongIsRememberedAndNotSearchedAgain(monkeypatch):
     assert calls == [query, videoUrl]
     fakeExtract.broken = True
     assert downloader.resolveStream(query, useCache=False)["url"] == "https://media/1"
+
+
+def test_stalledFirstRequestIsRetriedQuickly(application, rangeServer):
+    """Sometimes YouTube's server accepts the connection and never answers: retry after a few seconds, not 20."""
+    from app.audio_engine import AudioEngine
+    RangeHandler.stalled = False
+    engine = AudioEngine()
+    statuses = []
+    engine.mediaStatusChanged.connect(statuses.append)
+    started = time.time()
+    engine.setSource(QUrl(rangeServer + "/stall/tone.m4a"))
+    assert waitFor(application, lambda: engine.decodedFrames > 0, timeout=15)
+    assert time.time() - started < 9
+    engine.shutdown()

@@ -22,6 +22,7 @@ MAX_SHARED_QUEUE = 400
 STATE_WAIT_MS = 4000
 RECOVER_FIRST_DELAY_SECONDS = 2
 RECOVER_RETRY_SECONDS = 15
+USER_ACTION_SECONDS = 2.5
 
 _ANIMALS = ["Volpe", "Lupo", "Gufo", "Panda", "Tigre", "Delfino", "Falco", "Koala", "Lince", "Orso", "Puma", "Corvo",
             "Fenice", "Drago", "Gatto", "Riccio", "Squalo", "Cobra", "Lemure", "Bisonte"]
@@ -286,8 +287,15 @@ class TogetherController(QObject):
         self.pendingSeek = False
         if self.state and not seek:
             sameQueue = [track["key"] for track in tracks] == [track["key"] for track in self.state.get("queue") or []]
-            if sameQueue and index == self.state.get("index") and playing == bool(self.state.get("playing")) \
-                    and _effectsEqual(self.roomEffects, self.state.get("effects")):
+            sameSong = sameQueue and index == self.state.get("index")
+            sameEffects = _effectsEqual(self.roomEffects, self.state.get("effects"))
+            if sameSong and playing == bool(self.state.get("playing")) and sameEffects:
+                return
+            if sameSong and sameEffects and time.monotonic() - self.player.userActionAt > USER_ACTION_SECONDS:
+                # Play/pause changed by itself (loading, error, delay): nobody pressed anything, so the room
+                # stays as it is and I go back in line with it.
+                print(f"[Stanza] {'play' if playing else 'pausa'} non mio (nessun click): non lo mando agli altri")
+                QTimer.singleShot(0, self._checkDrift)
                 return
         self._publishState(seek=seek, snapshot=(tracks, index, playing))
 

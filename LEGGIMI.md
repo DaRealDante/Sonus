@@ -1,4 +1,4 @@
-# Sonus v1.0.3
+# Sonus v1.0.4
 
 
 ## Installare / aggiornare (tu)
@@ -60,6 +60,10 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Impostazioni → **"Non scaricare: aggiungi le canzoni solo in streaming"**: il bottone Scarica diventa *Aggiungi* (vale anche per playlist YouTube e Spotify)
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
+
+## Sonus 1.0.4
+- **Fix "X ha messo in pausa" falso**: nella stanza play e pausa partono solo se qualcuno li clicca davvero; una pausa causata dall'app (caricamento, errore, ritardo) resta tua e l'app si rimette in pari da sola
+- **Fix canzoni in streaming che caricavano 15-20 secondi**: a volte il server di YouTube non risponde alla prima richiesta; ora dopo 5 secondi riprova subito invece di aspettarne 20
 
 ## Sonus 1.0.3
 - Icona senza sfondo

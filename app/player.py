@@ -82,6 +82,7 @@ class Player(QObject):
         self.prefetchPool = QThreadPool(self)
         self.prefetchPool.setMaxThreadCount(1)
         self.skipOnError = True
+        self.userActionAt = 0.0
 
         self.loopTimer = QTimer(self)
         self.loopTimer.setInterval(15)
@@ -110,6 +111,7 @@ class Player(QObject):
 
     # ---------- queue ----------
     def playSongs(self, songs, startIndex=0, shuffled=None):
+        self._markUserAction()
         songs = [dict(song) for song in songs]
         if not songs:
             return
@@ -179,6 +181,7 @@ class Player(QObject):
         self.queueChanged.emit()
 
     def jumpTo(self, index):
+        self._markUserAction()
         if 0 <= index < len(self.queue):
             self.currentIndex = index
             self._loadCurrent(autoplay=True)
@@ -331,7 +334,14 @@ class Player(QObject):
         self.queueChanged.emit()
         self._loadCurrent(autoplay=False, startPosition=position)
 
+    def _markUserAction(self):
+        """Remembers that the person did something (play, pause, skip...): in a room only these are sent to
+        the others, never a pause caused by loading or an error."""
+        import time
+        self.userActionAt = time.monotonic()
+
     def togglePlay(self):
+        self._markUserAction()
         if self.currentSong() is None:
             return
         if self.loading:
@@ -350,11 +360,14 @@ class Player(QObject):
             self.togglePlay()
 
     def pause(self):
+        self._markUserAction()
         if self.loading:
             self.loadAutoplay = False
         self.mediaPlayer.pause()
 
     def next(self, automatic=False):
+        if not automatic:
+            self._markUserAction()
         if not self.queue:
             return
         if self.currentIndex + 1 < len(self.queue):
@@ -377,6 +390,7 @@ class Player(QObject):
         self._loadCurrent(autoplay=True)
 
     def previous(self):
+        self._markUserAction()
         if not self.queue:
             return
         if self.mediaPlayer.position() > 3000 or self.currentIndex == 0:
@@ -387,6 +401,7 @@ class Player(QObject):
         self._loadCurrent(autoplay=True)
 
     def seek(self, positionMs):
+        self._markUserAction()
         self.mediaPlayer.setPosition(max(0, int(positionMs)))
         self.seeked.emit(max(0, int(positionMs)))
 
