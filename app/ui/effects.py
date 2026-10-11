@@ -333,6 +333,6 @@ def _heartPath(center, size):
 def heartBurst(button):
     if not enabled("fxMicro") or not button.isVisible():
         return
-    window = button.window()
+    window = QWidget.window(button)
     center = button.mapTo(window, button.rect().center())
     HeartBurst(window, center)

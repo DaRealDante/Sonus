@@ -1,4 +1,4 @@
-# Sonus v1.0.2
+# Sonus v1.0.3
 
 
 ## Installare / aggiornare (tu)
@@ -61,8 +61,16 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
 
+## Sonus 1.0.3
+- Icona senza sfondo
+- Se Sonus è installato in una cartella protetta (es. C:\Program Files), l'aggiornamento chiede il permesso a Windows invece di fallire
+- Fix: il bottone ▶ sulle copertine (Home/Scopri) non faceva partire la canzone
+- Fix: errori ripetuti nel log quando clicchi nella finestra
+- Lo streaming parte prima (ffmpeg aspetta meno dati prima di iniziare)
+
 ## Sonus 1.0.2
 - Log dettagliato dello streaming: tempo di ricerca su YouTube, primo audio e avvisi del motore di YouTube
+
 
 ## Sonus 1.0.1
 - **Nuova icona**

@@ -214,6 +214,9 @@ class _Decoder(threading.Thread):
         executable = ffmpegExe()
         command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error"]
         remote = isRemote(self.path)
+        if remote:
+            # Start decoding after a small look at the stream instead of the default 5 MB / 5 s probe
+            command += ["-probesize", "262144", "-analyzeduration", "1000000"]
         command += ["-i", "pipe:0" if remote else self.path, "-vn", "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE)]
         audioFilter = speedFilter(self.rate, self.keepPitch)
         if audioFilter:
@@ -269,6 +272,8 @@ class _Decoder(threading.Thread):
         position = 0
         total = None
         failures = 0
+        feedStartedAt = time.time()
+        loggedFirstByte = False
         try:
             while not self.cancelled:
                 if total is not None and position >= total:
@@ -304,6 +309,9 @@ class _Decoder(threading.Thread):
                             data = response.read(STREAM_READ_BYTES)
                             if not data:
                                 break
+                            if not loggedFirstByte:
+                                loggedFirstByte = True
+                                print(f"[Audio] YouTube ha risposto dopo {time.time() - feedStartedAt:.1f}s")
                             pipe.write(data)
                             received += len(data)
                     except (BrokenPipeError, ValueError):
@@ -314,6 +322,9 @@ class _Decoder(threading.Thread):
                             self.feedError = str(error)
                             return
                 position += received
+                if received and position == received:
+                    elapsed = max(0.001, time.time() - feedStartedAt)
+                    print(f"[Audio] primo pezzo: {received // 1024} KB in {elapsed:.1f}s ({received / 1024 / elapsed:.0f} KB/s)")
                 if received:
                     failures = 0
                 if wholeFile and received:

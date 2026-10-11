@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 
@@ -70,3 +72,39 @@ def downloadInstaller(info, progressCallback=None):
         raise RuntimeError("Download incompleto, riprova")
     os.replace(partialPath, targetPath)
     return targetPath
+
+
+def installFolder():
+    return os.path.dirname(os.path.abspath(sys.executable))
+
+
+def canWrite(folder):
+    """True if this user can change the app folder without administrator rights (Programs in AppData: yes,
+    C:\\Program Files: no)."""
+    probe = os.path.join(folder, f".sonus_write_test_{os.getpid()}")
+    try:
+        with open(probe, "w") as handle:
+            handle.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def launchInstaller(path):
+    """Starts the installer. If the app sits in a protected folder, Windows asks for permission (UAC) first.
+    Returns None when it started, otherwise a short reason."""
+    arguments = ["/SILENT", "/NOCANCEL"]
+    if sys.platform != "win32" or canWrite(installFolder()):
+        try:
+            subprocess.Popen([path, *arguments], close_fds=True)
+            return None
+        except OSError as error:
+            return str(error)
+    import ctypes
+    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", path, " ".join(arguments), None, 1)
+    if result > 32:
+        return None
+    if result == 5:
+        return "Permesso negato: per aggiornare serve cliccare Sì nella finestra di Windows"
+    return f"Windows non ha avviato l'aggiornamento (codice {result})"

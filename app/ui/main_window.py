@@ -1383,7 +1383,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.MouseButtonPress, QEvent.Wheel, QEvent.KeyPress) and self.ambientActive:
-            if isinstance(obj, QWidget) and obj.window() is self:
+            if isinstance(obj, QWidget) and QWidget.window(obj) is self:
                 self._showInterface()
         return False
 
@@ -1448,10 +1448,10 @@ class MainWindow(QMainWindow):
         progress.close()
         if not os.path.isfile(path):
             return
-        try:
-            subprocess.Popen([path, "/SILENT", "/NOCANCEL"], close_fds=True)
-        except OSError as error:
-            QMessageBox.warning(self, APP_NAME, f"Impossibile avviare l'aggiornamento:\n{error}")
+        from .. import app_updater
+        problem = app_updater.launchInstaller(path)
+        if problem:
+            QMessageBox.warning(self, APP_NAME, f"Impossibile avviare l'aggiornamento:\n{problem}")
             return
         self.close()
 

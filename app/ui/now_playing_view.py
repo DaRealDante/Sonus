@@ -400,7 +400,7 @@ class FullscreenHost(QWidget):
             if event.key() == Qt.Key_Left:
                 self.view.window.player.seekRelative(-5000)
                 return True
-        elif event.type() == QEvent.MouseButtonDblClick and self.isVisible() and isinstance(obj, QWidget) and obj.window() is self:
+        elif event.type() == QEvent.MouseButtonDblClick and self.isVisible() and isinstance(obj, QWidget) and QWidget.window(obj) is self:
             self.view.toggleFullscreen()
             return True
         return False

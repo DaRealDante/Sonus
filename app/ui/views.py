@@ -330,7 +330,7 @@ class Card(QFrame):
             playButton.setFixedSize(44, 44)
             playButton.setParent(coverLabel)
             playButton.move(152 - 52, 152 - 52)
-            playButton.clicked.connect(onPlay)
+            playButton.clicked.connect(lambda checked=False: onPlay())
             playButton.hide()
             self.playButton = playButton
         else:

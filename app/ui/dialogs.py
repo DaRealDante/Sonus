@@ -576,7 +576,6 @@ class SettingsDialog(QDialog):
         layout.addLayout(buttons)
 
     def _installUpdate(self):
-        import subprocess
         filePath, _ = QFileDialog.getOpenFileName(self, "Scegli il file di aggiornamento", os.path.expanduser("~/Downloads"),
                                                   "Installer Sonus (Sonus_Setup*.exe);;Programmi (*.exe)")
         if not filePath:
@@ -585,7 +584,11 @@ class SettingsDialog(QDialog):
                                                       "Le tue playlist e canzoni non verranno toccate.")
         if answer != QMessageBox.Yes:
             return
-        subprocess.Popen([filePath, "/SILENT", "/NOCANCEL"], close_fds=True)
+        from .. import app_updater
+        problem = app_updater.launchInstaller(filePath)
+        if problem:
+            QMessageBox.warning(self, APP_NAME, f"Impossibile avviare l'aggiornamento:\n{problem}")
+            return
         self.accept()
         if self.parent():
             self.parent().close()
