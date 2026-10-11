@@ -5,6 +5,7 @@ import time
 import uuid
 
 from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtMultimedia import QMediaPlayer
 
 from .config import TEMP_DIR, settings
 from .database import isStreamPath
@@ -14,11 +15,13 @@ from .session_link import Link, makeCode
 from .together_sync import ClockSync, expectedPosition, isNewer, nowMs, trackFromSong
 
 DRIFT_TOLERANCE_MS = 700
-ROOM_FILE_WAIT_SECONDS = 30
+ROOM_FILE_WAIT_SECONDS = 20
 FILE_ID_CACHE_SECONDS = 120
 REUPLOAD_AFTER_SECONDS = 50 * 60
 MAX_SHARED_QUEUE = 400
 STATE_WAIT_MS = 4000
+RECOVER_FIRST_DELAY_SECONDS = 2
+RECOVER_RETRY_SECONDS = 15
 
 _ANIMALS = ["Volpe", "Lupo", "Gufo", "Panda", "Tigre", "Delfino", "Falco", "Koala", "Lince", "Orso", "Puma", "Corvo",
             "Fenice", "Drago", "Gatto", "Riccio", "Squalo", "Cobra", "Lemure", "Bisonte"]
@@ -80,6 +83,7 @@ class TogetherController(QObject):
         self.roomEffects = None
         self.pendingSeek = False
         self.joinedAt = 0
+        self.recovery = None
 
         self.publishTimer = QTimer(self)
         self.publishTimer.setSingleShot(True)
@@ -257,9 +261,14 @@ class TogetherController(QObject):
         index = self.player.currentIndex - start if self.player.currentIndex >= 0 else -1
         playing = self.player.isPlaying() or (self.player.loading and self.player.loadAutoplay)
         current = self.player.currentSong()
-        couldNotLoad = current is not None and not self.player.loading and self.player.mediaPlayer.source().isEmpty()
-        if couldNotLoad and self.state and self._currentTrackKey(self.state) == self._keyOf(current):
-            playing = bool(self.state.get("playing"))
+        if not playing and current is not None and self.state and self._currentTrackKey(self.state) == self._keyOf(current):
+            # Not playing only because of the app, not because of me: the song could not load, it is still
+            # loading, or my personal delay makes me wait a moment. Never tell the others "pause" for that.
+            couldNotLoad = not self.player.loading and (self.player.mediaPlayer.source().isEmpty()
+                                                         or self.player.mediaPlayer.mediaStatus() == QMediaPlayer.InvalidMedia)
+            waitingForMyDelay = bool(self.state.get("playing")) and self._targetPosition(self.state) < 0
+            if couldNotLoad or waitingForMyDelay:
+                playing = bool(self.state.get("playing"))
         return tracks, index, playing
 
     def _publishIfChanged(self):
@@ -295,6 +304,8 @@ class TogetherController(QObject):
             "effects": dict(self.roomEffects) if self.roomEffects else None, "version": self.version, "by": self.myId(),
         }
         self.link.publish(self.code, "state", self.state, retain=True)
+        current = tracks[index]["title"] if 0 <= index < len(tracks) else None
+        print(f"[Stanza] io: {current!r} {'play' if playing else 'pausa'} a {int(positionMs) // 1000}s (v{self.version})")
         self._ensureUploads()
 
     # ---------- remote changes ----------
@@ -320,6 +331,11 @@ class TogetherController(QObject):
         if not self.waitingForState and not isNewer(state, self.state):
             return
         previous = self.state
+        queue = state.get("queue") or []
+        index = state.get("index", -1)
+        title = queue[index].get("title") if 0 <= index < len(queue) else None
+        print(f"[Stanza] da {state.get('by')}: {title!r} {'play' if state.get('playing') else 'pausa'} "
+              f"a {int(state.get('positionMs') or 0) // 1000}s (v{state.get('version')})")
         self.waitingForState = False
         self.waitTimer.stop()
         self.state = state
@@ -378,6 +394,9 @@ class TogetherController(QObject):
                                                        "reverbSize": self.player.mediaPlayer.reverbSize,
                                                        "bassBoost": self.player.mediaPlayer.bassBoost}):
                 self._applyEffects(effects)
+            if self._couldNotLoad():
+                self._recoverPlayback(state, expected)
+                return
             if expected < 0:
                 if self.player.isPlaying():
                     self.player.mediaPlayer.pause()
@@ -423,6 +442,10 @@ class TogetherController(QObject):
         if current is None or self._keyOf(current) != self._currentTrackKey(state):
             return
         expected = self._targetPosition(state)
+        if self._couldNotLoad():
+            self._recoverPlayback(state, expected)
+            return
+        self.recovery = None
         self.applying += 1
         try:
             if expected < 0:
@@ -437,6 +460,45 @@ class TogetherController(QObject):
                     self.player.mediaPlayer.play()
             if abs(self.player.position() - expected) > DRIFT_TOLERANCE_MS and (state.get("playing") or not self.player.isPlaying()):
                 self.player.mediaPlayer.setPosition(expected)
+        finally:
+            self.applying -= 1
+
+    def _couldNotLoad(self):
+        """The room's song is selected but nothing is loaded (streaming failed): moving the position would only
+        move the bar in silence."""
+        media = self.player.mediaPlayer
+        return not self.player.loading and (media.source().isEmpty() or media.mediaStatus() == QMediaPlayer.InvalidMedia)
+
+    def _recoverPlayback(self, state, expected):
+        """Retries the room's song by itself: first a fresh link, then a temporary download, then every few seconds."""
+        current = self.player.currentSong()
+        if current is None:
+            return
+        key = self._keyOf(current)
+        now = time.monotonic()
+        if self.recovery is None or self.recovery["key"] != key:
+            self.recovery = {"key": key, "attempts": 0, "nextAt": now + RECOVER_FIRST_DELAY_SECONDS}
+            return
+        if now < self.recovery["nextAt"]:
+            return
+        attempts = self.recovery["attempts"] = self.recovery["attempts"] + 1
+        self.recovery["nextAt"] = now + RECOVER_RETRY_SECONDS
+        if attempts == 2:
+            self.notify(f"Non riesco a riprodurre \"{current.get('title') or 'la canzone'}\": riprovo da solo")
+        print(f"[Stanza] riprovo a caricare {current.get('title')!r} (tentativo {attempts})")
+        startPosition = max(0, expected)
+        autoplay = bool(state.get("playing")) and expected >= 0
+        path = str(current.get("path") or "")
+        self.applying += 1
+        try:
+            if isStreamPath(path) and attempts % 2 == 0 and "roomfile:" not in path:
+                self.player._loadFallback(current, startPosition)
+            else:
+                if isStreamPath(path):
+                    from .player import _forgetStream
+                    from .database import streamTarget
+                    _forgetStream(streamTarget(path))
+                self.player._loadCurrent(autoplay=autoplay, startPosition=startPosition)
         finally:
             self.applying -= 1
 
@@ -489,7 +551,7 @@ class TogetherController(QObject):
     # ---------- personal files (mp3 not on YouTube) ----------
     def _localFileId(self, song):
         path = str(song.get("path") or "")
-        if not path or isStreamPath(path) or song.get("url"):
+        if not path or isStreamPath(path) or (song.get("url") and song.get("source") != "cut"):
             return None
         cached = self.fileIdCache.get(path)
         if cached and time.time() - cached[0] < FILE_ID_CACHE_SECONDS:
@@ -537,11 +599,13 @@ class TogetherController(QObject):
         return {"id": fileId, "url": url, "key": key, "sha": sha, "ext": os.path.splitext(path)[1].lower(), "at": int(time.time())}
 
     def _onUploaded(self, code, info):
+        print(f"[Stanza] mio file inviato agli altri ({info.get('id', '')[:8]})")
         self.uploads[info["id"]] = {"state": "done", "at": time.time()}
         if code == self.code:
             self.link.publish(code, f"files/{info['id']}", info, retain=True)
 
     def _onUploadFailed(self, code, fileId, message):
+        print(f"[Stanza] invio del mio file non riuscito: {message}")
         self.uploads.pop(fileId, None)
         alreadyFailed = fileId in self.failedUploads
         self.failedUploads[fileId] = time.time()
@@ -554,7 +618,8 @@ class TogetherController(QObject):
         """Runs in a worker thread: waits for the friend's upload, downloads and decrypts it; falls back to YouTube."""
         body = target[len("roomfile:"):]
         fileId, _, query = body.partition("|")
-        deadline = time.time() + ROOM_FILE_WAIT_SECONDS
+        startedAt = time.time()
+        deadline = startedAt + ROOM_FILE_WAIT_SECONDS
         info = self.fileInfos.get(fileId)
         while info is None and time.time() < deadline and self.code:
             time.sleep(0.5)
@@ -563,12 +628,14 @@ class TogetherController(QObject):
             try:
                 fetchInfo = dict(info, sha=info.get("sha") or fileId)
                 path = self.roomCache.fetch(fetchInfo)
+                print(f"[Stanza] file dell'amico pronto in {time.time() - startedAt:.1f}s")
                 self.currentRoomFile = path
                 self.roomFilePaths[fileId] = path
                 from PySide6.QtCore import QUrl
                 return {"url": QUrl.fromLocalFile(path).toString(), "headers": {}, "duration": 0}
             except Exception as error:
                 print(f"[Together] file della stanza non scaricato: {error!r}")
+        print(f"[Stanza] file dell'amico non arrivato dopo {time.time() - startedAt:.1f}s: la cerco su YouTube")
         if not query:
             raise RuntimeError("canzone non disponibile")
         from .downloader import resolveStream

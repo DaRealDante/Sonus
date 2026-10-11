@@ -210,3 +210,48 @@ def test_bassBoostSharedInRoom(localBroker, toneUrl, fakeSoundCard):
     bruno.controller.joinRoom(code)
     assert waitFor(lambda: abs(bruno.player.mediaPlayer.bassBoost - 0.6) < 0.001, 15)
     shutdown(alice, bruno)
+
+
+def test_roomSongRecoversWhenStreamingFailsAtFirst(localBroker, toneUrl, fakeSoundCard, monkeypatch):
+    import app.together as together
+    monkeypatch.setattr(together, "RECOVER_FIRST_DELAY_SECONDS", 0.5)
+    monkeypatch.setattr(together, "RECOVER_RETRY_SECONDS", 1)
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    songIds = [alice.database.addStreamSong("https://youtu.be/eeeeeeeeeee", "Ostinata", "X", "", 90, None)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    failures = [0]
+
+    def flakyResolver(target, useCache=True):
+        if failures[0] < 2:
+            failures[0] += 1
+            raise RuntimeError("rete instabile")
+        return {"url": toneUrl, "headers": {}, "duration": 90}
+
+    bruno.player.streamResolver = flakyResolver
+    bruno.player.streamFallback = lambda target: (_ for _ in ()).throw(RuntimeError("niente download"))
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.isPlaying(), 20)
+    assert waitFor(lambda: abs(alice.player.position() - bruno.player.position()) < 700, 8)
+    assert waitFor(lambda: not bruno.player.mediaPlayer.isSeekPending(), 8)
+    shutdown(alice, bruno)
+
+
+
+
+def test_delayDoesNotPauseTheRoomAtSongStart(localBroker, toneUrl, fakeSoundCard):
+    """Bruno has a personal delay: at the start of a song he waits a moment, but must not pause everybody."""
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    bruno.controller.delayOverride = 2500
+    songIds = [alice.database.addStreamSong(f"https://youtu.be/{index:011d}", f"Inizio {index}", "X", "", 90, None) for index in range(2)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.isPlaying(), 15)
+    alice.player.next()
+    pump(4)
+    assert alice.player.isPlaying()
+    assert alice.controller.state["playing"]
+    assert not any("pausa" in notice for notice in alice.notices)
+    assert waitFor(lambda: bruno.player.isPlaying() and bruno.player.currentSong()["title"] == "Inizio 1", 8)
+    shutdown(alice, bruno)

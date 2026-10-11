@@ -158,6 +158,7 @@ class Link(QObject):
         self.connected = False
         self.running = False
         self.failures = 0
+        self.lastError = ""
         self._connectResult.connect(self._onConnectResult)
         self._incoming.connect(self._onIncoming)
         self.retryTimer = QTimer(self)
@@ -266,10 +267,12 @@ class Link(QObject):
         def onConnect(clientRef, userdata, flags, reasonCode, properties):
             attemptState["confirmed"] = not reasonCode.is_failure
             if reasonCode.is_failure:
+                self.lastError = f"rifiutato dal server ({reasonCode})"
                 print(f"[Link] il server ha rifiutato la connessione: {reasonCode}")
             self._connectResult.emit(attempt, "failed" if reasonCode.is_failure else "connected")
 
         def onConnectFail(clientRef, userdata):
+            self.lastError = "connessione fallita (porta bloccata o server giù)"
             self._connectResult.emit(attempt, "failed")
 
         def onDisconnect(clientRef, userdata, flags, reasonCode, properties):
@@ -289,6 +292,7 @@ class Link(QObject):
             client.connect_async(host, port, keepalive=30, clean_start=True)
             client.loop_start()
         except Exception as error:
+            self.lastError = repr(error)
             print(f"[Link] {host}:{port} non raggiungibile: {error!r}")
             self._connectResult.emit(attempt, "failed")
 
@@ -297,6 +301,7 @@ class Link(QObject):
             return
         if result == "connected":
             self.failures = 0
+            self.lastError = ""
             for code, subtopics in self.subtopics.items():
                 box = self.boxes[code]
                 for subtopic in subtopics:
@@ -315,6 +320,7 @@ class Link(QObject):
         if result == "lost":
             return
         self.failures += 1
+        print(f"[Link] {self.brokerName()}: {self.lastError or 'non risponde'}")
         if self.failures >= 2:
             self.failures = 0
             self.brokerIndex = (self.brokerIndex + 1) % len(self.brokers)

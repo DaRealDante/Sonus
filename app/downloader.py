@@ -71,10 +71,22 @@ _streamCache = {}
 _streamCacheLock = threading.Lock()
 
 
+_resolveLocks = {}
+
+
 def resolveStream(target, useCache=True):
-    """Direct audio URL for a YouTube link or a `ytsearch1:` query, without downloading."""
-    import yt_dlp
+    """Direct audio URL for a YouTube link or a `ytsearch1:` query, without downloading.
+    The same song asked twice at once (e.g. prefetched and then played) is looked up only once."""
     target = target.strip()
+    with _streamCacheLock:
+        lock = _resolveLocks.setdefault(target, threading.Lock())
+    with lock:
+        return _resolveStreamLocked(target, useCache)
+
+
+def _resolveStreamLocked(target, useCache):
+    import yt_dlp
+    startedAt = time.time()
     if useCache:
         with _streamCacheLock:
             cached = _streamCache.get(target)
@@ -105,6 +117,7 @@ def resolveStream(target, useCache=True):
     }
     with _streamCacheLock:
         _streamCache[target] = (time.time(), dict(result))
+    print(f"[Stream] trovato in {time.time() - startedAt:.1f}s: {result['title'][:60]!r}")
     return result
 
 

@@ -142,3 +142,20 @@ def test_failedUploadFallsBackQuickly(localBroker, toneUrl, fakeSoundCard, tmp_p
     assert bruno.player.mediaPlayer.source().toString() == toneUrl
     assert sum("Non riesco a mandare" in notice for notice in alice.notices) == 1
     shutdown(alice, bruno)
+
+
+def test_friendHearsMyModifiedSongNotTheOriginal(localBroker, litterbox, toneUrl, fakeSoundCard, tmp_path, monkeypatch):
+    monkeypatch.setenv("SONUS_UPLOAD_URL", f"http://127.0.0.1:{litterbox.server_address[1]}/api")
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    mp3 = tmp_path / "Ken - Brano (slowed + reverb).mp3"
+    subprocess.run([ffmpegExe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=40", str(mp3)], check=True)
+    songId = alice.database.addSong(str(mp3), "Brano (slowed + reverb)", "Ken", "", 40, None, "cut",
+                                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    alice.player.playSongs([alice.database.getSong(songId)], 0)
+    code = alice.controller.createRoom()
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.currentSong() is not None, 10)
+    assert bruno.player.currentSong()["path"].startswith("stream:roomfile:")
+    assert waitFor(lambda: bruno.player.mediaPlayer.source().isLocalFile(), 25)
+    assert fileSha(bruno.player.mediaPlayer.source().toLocalFile()) == fileSha(str(mp3))
+    shutdown(alice, bruno)

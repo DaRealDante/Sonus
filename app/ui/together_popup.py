@@ -288,6 +288,10 @@ class TogetherPopup(QFrame):
             leaveButton = QPushButton("Esci dalla stanza")
             leaveButton.clicked.connect(self.controller.leaveRoom)
             layout.addWidget(leaveButton)
+        diagnosticsButton = QPushButton("Copia diagnostica")
+        diagnosticsButton.setToolTip("Copia lo stato della connessione e il log: incollalo nella chat per farlo controllare")
+        diagnosticsButton.clicked.connect(self._copyDiagnostics)
+        layout.addWidget(diagnosticsButton)
         for label in self.content.findChildren(QLabel):
             if label.wordWrap():
                 label.setMinimumHeight(label.heightForWidth(self.width() - 32))
@@ -302,6 +306,11 @@ class TogetherPopup(QFrame):
         delayMs = value * 50
         self._showDelay(delayMs)
         self.controller.setDelay(delayMs)
+
+    def _copyDiagnostics(self):
+        from .. import diagnostics
+        from ..config import VERSION
+        self._copy(diagnostics.report(self.controller, VERSION), "Diagnostica copiata: incollala nella chat")
 
     def _copy(self, text, message):
         QGuiApplication.clipboard().setText(text)

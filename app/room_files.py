@@ -90,26 +90,63 @@ def decryptFile(blobPath, keyBase64, outPath, expectedSha=None):
     return outPath
 
 
-def uploadTemporary(path, hours="1h", endpoint=None, timeout=300):
-    """Uploads to Litterbox (free, no account, deleted by the service after `hours`). Returns the download link."""
+def _multipartPost(endpoint, fields, fileField, fileData, timeout):
     boundary = "----Sonus" + uuid.uuid4().hex
-    with open(path, "rb") as source:
-        fileData = source.read()
-    parts = []
-    for name, value in (("reqtype", "fileupload"), ("time", hours)):
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode("utf-8"))
-    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"sonus.bin\"\r\n"
+    parts = [f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode("utf-8")
+             for name, value in fields]
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{fileField}\"; filename=\"sonus.bin\"\r\n"
                  "Content-Type: application/octet-stream\r\n\r\n".encode("utf-8") + fileData + b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode("utf-8"))
-    body = b"".join(parts)
-    request = urllib.request.Request(endpoint or uploadEndpoint(), data=body, method="POST",
+    request = urllib.request.Request(endpoint, data=b"".join(parts), method="POST",
                                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
                                               "User-Agent": "Mozilla/5.0 Sonus"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        link = response.read().decode("utf-8", "ignore").strip()
+        return response.read().decode("utf-8", "ignore").strip()
+
+
+def _uploadLitterbox(fileData, timeout, endpoint=None):
+    reply = _multipartPost(endpoint or LITTERBOX_URL, (("reqtype", "fileupload"), ("time", "1h")), "fileToUpload", fileData, timeout)
+    if not reply.startswith("http"):
+        raise RuntimeError(f"Litterbox: {reply[:60]}")
+    return reply
+
+
+def _uploadTmpfiles(fileData, timeout):
+    import json
+    reply = json.loads(_multipartPost("https://tmpfiles.org/api/v1/upload", (), "file", fileData, timeout))
+    link = str((reply.get("data") or {}).get("url") or "")
     if not link.startswith("http"):
-        raise RuntimeError(f"upload non riuscito: {link[:80]}")
+        raise RuntimeError(f"tmpfiles: {str(reply)[:60]}")
+    return re.sub(r"^https?://tmpfiles\.org/", "https://tmpfiles.org/dl/", link.replace("http://", "https://"))
+
+
+def _uploadUguu(fileData, timeout):
+    import json
+    reply = json.loads(_multipartPost("https://uguu.se/upload", (), "files[]", fileData, timeout))
+    files = reply.get("files") or []
+    link = str(files[0].get("url") or "") if files else ""
+    if not link.startswith("https://"):
+        raise RuntimeError(f"uguu: {str(reply)[:60]}")
     return link
+
+
+UPLOAD_HOSTS = (("Litterbox", _uploadLitterbox), ("tmpfiles", _uploadTmpfiles), ("uguu", _uploadUguu))
+
+
+def uploadTemporary(path, hours="1h", endpoint=None, timeout=300):
+    """Uploads to a free temporary file host (Litterbox, then tmpfiles.org, then uguu.se). Returns the download link."""
+    with open(path, "rb") as source:
+        fileData = source.read()
+    if endpoint or os.environ.get("SONUS_UPLOAD_URL"):
+        return _uploadLitterbox(fileData, timeout, endpoint or uploadEndpoint())
+    errors = []
+    for name, uploader in UPLOAD_HOSTS:
+        try:
+            return uploader(fileData, timeout)
+        except Exception as error:
+            errors.append(f"{name}: {str(error)[:60]}")
+            print(f"[RoomFiles] upload su {name} non riuscito: {error!r}")
+    raise RuntimeError(" | ".join(errors))
 
 
 def downloadFile(url, outPath, timeout=120):

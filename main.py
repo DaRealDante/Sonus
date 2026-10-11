@@ -7,10 +7,9 @@ from PySide6.QtWidgets import QApplication
 
 from app.config import APP_NAME, DATA_DIR
 
-if sys.stdout is None or sys.stderr is None:
-    _logFile = open(os.path.join(DATA_DIR, "log.txt"), "w", encoding="utf-8", buffering=1)
-    sys.stdout = sys.stdout or _logFile
-    sys.stderr = sys.stderr or _logFile
+from app import diagnostics
+
+diagnostics.install(DATA_DIR)
 
 from app.updater import activateDownloadedEngine
 

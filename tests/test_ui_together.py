@@ -63,3 +63,16 @@ def test_sharePlaylistFromMenuAndJoinWithCode(window, monkeypatch):
     from PySide6.QtGui import QGuiApplication
     assert QGuiApplication.clipboard().text() == "sonus://join/" + code
     assert window.handleCode("ciao") is False
+
+
+def test_copyDiagnosticsFromRoom(window):
+    from PySide6.QtGui import QGuiApplication
+    window.together.createRoom()
+    assert waitFor(window.together.link.isConnected)
+    print("[Link] riga di prova per la diagnostica")
+    window.showTogether()
+    window.togetherPopup._copyDiagnostics()
+    text = QGuiApplication.clipboard().text()
+    assert text.startswith("Synth Music ") and "CONNESSO" in text and "Stanza: sì" in text
+    window.together.leaveRoom()
+    window.togetherPopup.hide()

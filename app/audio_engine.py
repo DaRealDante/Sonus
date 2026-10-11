@@ -377,6 +377,7 @@ class AudioEngine(QObject):
         self.loopFrames = None
         self.loopMs = None
         self.pendingSeekMs = None
+        self.pendingSeekAt = None
         self.durationMs = 0
         self.lastEmittedPosition = -1
         self.failMessage = None
@@ -421,6 +422,7 @@ class AudioEngine(QObject):
             self.loopFrames = None
             self.loopMs = None
             self.pendingSeekMs = None
+            self.pendingSeekAt = None
             self.failMessage = None
             self.zi = None
         self._source = QUrl(url) if url is not None else QUrl()
@@ -453,6 +455,7 @@ class AudioEngine(QObject):
                                 self.sourceHeaders if isRemote(path) else None)
         if startMs:
             self.pendingSeekMs = startMs
+            self.pendingSeekAt = time.monotonic() if self._state == QMediaPlayer.PlayingState else None
         self.decoder.start()
 
     def _cancelDecoder(self):
@@ -469,15 +472,21 @@ class AudioEngine(QObject):
             if self.reachedEnd:
                 self.reachedEnd = False
                 self.frame = 0
+            if self.pendingSeekMs is not None and self.pendingSeekAt is None:
+                self.pendingSeekAt = time.monotonic()
         self._setState(QMediaPlayer.PlayingState)
 
     def pause(self):
         if self._state == QMediaPlayer.PlayingState:
+            with self.lock:
+                self._freezePendingSeek()
             self._setState(QMediaPlayer.PausedState)
 
     def stop(self):
         with self.lock:
             self.frame = 0
+            self.pendingSeekMs = None
+            self.pendingSeekAt = None
         self._setState(QMediaPlayer.StoppedState)
         self.positionChanged.emit(0)
 
@@ -487,10 +496,28 @@ class AudioEngine(QObject):
     def mediaStatus(self):
         return self._status
 
+    def _pendingTargetMs(self):
+        """Where a seek that waits for the decoder should land: it keeps moving with time while playing,
+        so when the audio arrives it starts at the right point (not where it was asked seconds ago). Lock held."""
+        if self.pendingSeekMs is None:
+            return None
+        if self.pendingSeekAt is None:
+            return self.pendingSeekMs
+        return self.pendingSeekMs + (time.monotonic() - self.pendingSeekAt) * 1000 * self._rate
+
+    def _freezePendingSeek(self):
+        if self.pendingSeekMs is not None and self.pendingSeekAt is not None:
+            self.pendingSeekMs = self._pendingTargetMs()
+        self.pendingSeekAt = None
+
+    def isSeekPending(self):
+        with self.lock:
+            return self.pendingSeekMs is not None
+
     def position(self):
         with self.lock:
             if self.pendingSeekMs is not None:
-                return int(self.pendingSeekMs)
+                return int(self._pendingTargetMs())
             return int(self.frame / SAMPLE_RATE * 1000 * self._rate)
 
     def duration(self):
@@ -500,11 +527,17 @@ class AudioEngine(QObject):
         positionMs = max(0, int(positionMs))
         with self.lock:
             targetFrame = int(positionMs / 1000 / self._rate * SAMPLE_RATE)
-            if self.decodeDone and targetFrame >= self.decodedFrames:
-                targetFrame = max(0, self.decodedFrames - 1)
-            self.frame = targetFrame
             self.reachedEnd = False
-            self.pendingSeekMs = None
+            if not self.decodeDone and targetFrame >= self.decodedFrames:
+                # Not decoded yet (streaming): wait for it instead of sitting past the end of the audio in silence.
+                self.pendingSeekMs = positionMs
+                self.pendingSeekAt = time.monotonic() if self._state == QMediaPlayer.PlayingState else None
+            else:
+                if self.decodeDone and targetFrame >= self.decodedFrames:
+                    targetFrame = max(0, self.decodedFrames - 1)
+                self.frame = targetFrame
+                self.pendingSeekMs = None
+                self.pendingSeekAt = None
         self.lastEmittedPosition = positionMs
         self.positionChanged.emit(positionMs)
 
@@ -774,10 +807,11 @@ class AudioEngine(QObject):
                 outdata.fill(0)
                 return
             if self.pendingSeekMs is not None:
-                targetFrame = int(self.pendingSeekMs / 1000 / self._rate * SAMPLE_RATE)
+                targetFrame = int(self._pendingTargetMs() / 1000 / self._rate * SAMPLE_RATE)
                 if targetFrame < self.decodedFrames or self.decodeDone:
                     self.frame = min(targetFrame, max(0, self.decodedFrames - 1))
                     self.pendingSeekMs = None
+                    self.pendingSeekAt = None
                 else:
                     outdata.fill(0)
                     return

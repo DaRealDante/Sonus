@@ -43,3 +43,11 @@ def test_clockSyncPrefersShortestRoundTrip():
     assert clock.offset("peer") == 4000
     clock.forget("peer")
     assert clock.offset("peer") == 0
+
+
+def test_modifiedSongIsSharedAsPersonalFile():
+    cut = {"title": "Brano (slowed + reverb)", "artist": "X", "path": "/m/brano slowed.mp3", "source": "cut",
+           "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+    track = trackFromSong(cut)
+    assert track["url"] is None
+    assert track["key"] == "t:brano slowed reverb|x"

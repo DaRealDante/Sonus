@@ -28,7 +28,7 @@ def trackKey(title, artist, url=None):
 
 def trackFromSong(song):
     """What other people need to find the same song: its YouTube link, or title + artist to search it."""
-    url = song.get("url") or None
+    url = None if song.get("source") == "cut" else (song.get("url") or None)
     path = str(song.get("path") or "")
     query = path[len("stream:"):] if path.startswith("stream:ytsearch") else None
     return {

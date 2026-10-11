@@ -250,6 +250,22 @@ class Player(QObject):
             self.mediaPlayer.play()
             self.songStarted.emit(song["id"])
         self.songLoaded.emit(song)
+        self._prefetchNext()
+
+    def _prefetchNext(self):
+        """Looks up the next streaming song in advance: when it starts (or a friend in the room skips to it)
+        it plays right away instead of waiting several seconds for YouTube."""
+        nextIndex = self.currentIndex + 1
+        if not (0 <= nextIndex < len(self.queue)):
+            return
+        song = self.queue[nextIndex]
+        if not song or not isStreamPath(song.get("path") or ""):
+            return
+        target = streamTarget(song["path"])
+        if target.startswith("roomfile:"):
+            return
+        runInBackground(self.streamResolver, target, True, pool=self.resolvePool,
+                        onError=lambda message: print(f"[Stream] anticipo non riuscito: {_shortError(message)}"))
 
     def _setLoading(self, loading):
         if loading != self.loading:

@@ -272,3 +272,35 @@ def test_streamCutMidSongReportsError(application, rangeServer, monkeypatch):
     assert waitFor(application, lambda: errors, 10)
     assert "403" in errors[0]
     engine.shutdown()
+
+
+def test_seekPastDecodedAudioWaitsAndKeepsTime(application):
+    """Room drift/seek on a song still downloading: no silent jump past the audio, lands in time when it arrives."""
+    import numpy
+    from app import audio_engine
+    engine = audio_engine.AudioEngine()
+    rate = audio_engine.SAMPLE_RATE
+    with engine.lock:
+        engine.buffer = numpy.zeros((rate * 30, audio_engine.CHANNELS), dtype=numpy.int16)
+        engine.decodedFrames = rate
+        engine.decodeDone = False
+    engine._setState(QMediaPlayer.PlayingState)
+    engine.setPosition(10000)
+    assert engine.isSeekPending()
+    time.sleep(0.5)
+    assert 10300 < engine.position() < 10900
+    engine.pause()
+    frozen = engine.position()
+    time.sleep(0.3)
+    assert engine.position() == frozen
+    engine._setState(QMediaPlayer.PlayingState)
+    engine.play()
+    with engine.lock:
+        engine.decodedFrames = rate * 20
+    outdata = numpy.zeros((512, audio_engine.CHANNELS), dtype=numpy.float32)
+    engine._callback(outdata, 512, None, None)
+    assert not engine.isSeekPending()
+    assert abs(engine.frame / rate * 1000 - frozen) < 200
+    engine.setPosition(2000)
+    assert not engine.isSeekPending() and abs(engine.position() - 2000) < 20
+    engine.shutdown()
