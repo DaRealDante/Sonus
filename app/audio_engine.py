@@ -233,6 +233,7 @@ class _Decoder(threading.Thread):
         frameBytes = 2 * CHANNELS
         decodedFrames = 0
         leftover = b""
+        startedAt = time.time()
         while not self.cancelled:
             chunk = self.process.stdout.read(SAMPLE_RATE * frameBytes // 2)
             if not chunk:
@@ -247,6 +248,8 @@ class _Decoder(threading.Thread):
                 buffer = newBuffer
                 self.engine._attachBuffer(self.generation, buffer)
             buffer[decodedFrames:decodedFrames + len(frames)] = frames
+            if remote and decodedFrames == 0 and len(frames):
+                print(f"[Audio] primo audio dallo streaming dopo {time.time() - startedAt:.1f}s")
             decodedFrames += len(frames)
             self.engine._setDecoded(self.generation, decodedFrames)
         if self.cancelled:

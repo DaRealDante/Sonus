@@ -12,8 +12,24 @@ from .config import TEMP_DIR, denoExe, settings
 from .workers import runInBackground
 
 
+class _YoutubeLog:
+    """yt-dlp warnings and errors go to log.txt (e.g. YouTube's challenge not solved = slow or failing songs)."""
+
+    def debug(self, message):
+        pass
+
+    def info(self, message):
+        pass
+
+    def warning(self, message):
+        print(f"[yt-dlp] {str(message)[:300]}")
+
+    def error(self, message):
+        print(f"[yt-dlp] ERRORE {str(message)[:300]}")
+
+
 def _baseOptions():
-    options = {"quiet": True, "no_warnings": True, "noprogress": True, "ignoreerrors": False}
+    options = {"quiet": True, "no_warnings": False, "noprogress": True, "ignoreerrors": False, "logger": _YoutubeLog()}
     denoPath = denoExe()
     if denoPath:
         options["js_runtimes"] = {"deno": {"path": denoPath}}
@@ -84,18 +100,95 @@ def resolveStream(target, useCache=True):
         return _resolveStreamLocked(target, useCache)
 
 
-def _resolveStreamLocked(target, useCache):
+_threadLocal = threading.local()
+_matchesLock = threading.Lock()
+_matches = None
+
+
+def _matchesPath():
+    from .config import DATA_DIR
+    return os.path.join(DATA_DIR, "youtube_matches.json")
+
+
+def _loadMatches():
+    global _matches
+    if _matches is None:
+        try:
+            import json
+            with open(_matchesPath(), encoding="utf-8") as handle:
+                _matches = dict(json.load(handle))
+        except (OSError, ValueError):
+            _matches = {}
+    return _matches
+
+
+def knownVideoUrl(query):
+    """The YouTube video a `ytsearch1:` query already led to (so nobody has to search it again)."""
+    if not query:
+        return None
+    with _matchesLock:
+        return _loadMatches().get(query.strip())
+
+
+def _rememberMatch(query, videoUrl):
+    import json
+    with _matchesLock:
+        matches = _loadMatches()
+        if matches.get(query) == videoUrl:
+            return
+        matches[query] = videoUrl
+        if len(matches) > 5000:
+            for oldKey in list(matches)[:1000]:
+                del matches[oldKey]
+        try:
+            with open(_matchesPath() + ".tmp", "w", encoding="utf-8") as handle:
+                json.dump(matches, handle)
+            os.replace(_matchesPath() + ".tmp", _matchesPath())
+        except OSError:
+            pass
+
+
+def _youtube():
+    """One yt-dlp per worker thread, kept alive: YouTube's player and its solved challenges stay in memory,
+    so after the first song the next ones are found much faster."""
     import yt_dlp
+    instance = getattr(_threadLocal, "youtube", None)
+    if instance is None:
+        options = _baseOptions()
+        options.update({"format": "bestaudio[ext=m4a]/bestaudio/best", "noplaylist": True})
+        instance = yt_dlp.YoutubeDL(options)
+        _threadLocal.youtube = instance
+    return instance
+
+
+def _extract(target):
+    try:
+        return _youtube().extract_info(target, download=False)
+    except Exception:
+        _threadLocal.youtube = None
+        raise
+
+
+def _resolveStreamLocked(target, useCache):
     startedAt = time.time()
+    if not (useCache and _streamCache.get(target)):
+        print(f"[Stream] cerco su YouTube: {target[:80]!r}")
     if useCache:
         with _streamCacheLock:
             cached = _streamCache.get(target)
         if cached and time.time() - cached[0] < STREAM_CACHE_SECONDS:
             return dict(cached[1])
-    options = _baseOptions()
-    options.update({"format": "bestaudio[ext=m4a]/bestaudio/best", "noplaylist": True})
-    with yt_dlp.YoutubeDL(options) as youtube:
-        info = youtube.extract_info(target, download=False)
+    isSearch = target.lower().startswith("ytsearch")
+    info = None
+    knownUrl = knownVideoUrl(target) if isSearch else None
+    if knownUrl:
+        try:
+            info = _extract(knownUrl)
+        except Exception as error:
+            print(f"[Stream] il video trovato l'ultima volta non va più, ricerco: {error}")
+            info = None
+    if info is None:
+        info = _extract(target)
     if info.get("entries") is not None:
         entries = [entry for entry in (info.get("entries") or []) if entry]
         if not entries:
@@ -115,6 +208,8 @@ def _resolveStreamLocked(target, useCache):
         "title": info.get("title") or "",
         "webpageUrl": info.get("webpage_url") or (target if isUrl(target) else ""),
     }
+    if isSearch and isUrl(result["webpageUrl"]):
+        _rememberMatch(target, result["webpageUrl"])
     with _streamCacheLock:
         _streamCache[target] = (time.time(), dict(result))
     print(f"[Stream] trovato in {time.time() - startedAt:.1f}s: {result['title'][:60]!r}")

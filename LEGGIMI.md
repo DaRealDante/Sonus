@@ -1,4 +1,4 @@
-# Sonus v1.0.1
+# Sonus v1.0.2
 
 
 ## Installare / aggiornare (tu)
@@ -61,9 +61,14 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
 
+## Sonus 1.0.2
+- Log dettagliato dello streaming: tempo di ricerca su YouTube, primo audio e avvisi del motore di YouTube
+
 ## Sonus 1.0.1
+- **Nuova icona**
+- Canzoni in streaming più rapide: YouTube resta "caldo" tra una canzone e l'altra, le canzoni già cercate non si ricercano più (e agli amici arriva direttamente il video), le prossime 2 della coda sono cercate in anticipo
 - Fix "ha messo in pausa" falso: chi ha il Ritardo sopra 0, o non riesce a caricare la canzone, non mette più in pausa tutti
-- Canzoni in streaming più veloci: la prossima della coda viene cercata in anticipo; se uno streaming fallisce si ricarica da solo
+- Se uno streaming fallisce si ricarica da solo
 - Niente silenzio quando si salta avanti in una canzone ancora in caricamento: parte appena arriva, al punto giusto
 - I tuoi file (mp3, tagliati, con effetti) arrivano agli amici come file tuo; se un sito di caricamento non va ne prova altri 2
 - Stanza → **Copia diagnostica**: incolla il testo in chat se qualcosa non va. Il log (`%APPDATA%\Sonus\log.txt`) ora tiene orari e storico

@@ -304,3 +304,26 @@ def test_seekPastDecodedAudioWaitsAndKeepsTime(application):
     engine.setPosition(2000)
     assert not engine.isSeekPending() and abs(engine.position() - 2000) < 20
     engine.shutdown()
+
+
+def test_searchedSongIsRememberedAndNotSearchedAgain(monkeypatch):
+    from app import downloader
+    calls = []
+    videoUrl = "https://www.youtube.com/watch?v=abcdefghijk"
+
+    def fakeExtract(target):
+        calls.append(target)
+        if target.startswith("ytsearch"):
+            return {"entries": [{"url": "https://media/1", "webpage_url": videoUrl, "title": "Brano", "duration": 100}]}
+        if target == videoUrl and not getattr(fakeExtract, "broken", False):
+            return {"url": "https://media/2", "webpage_url": videoUrl, "title": "Brano", "duration": 100}
+        raise RuntimeError("video rimosso")
+
+    monkeypatch.setattr(downloader, "_extract", fakeExtract)
+    query = "ytsearch1:Artista - Brano unico audio"
+    assert downloader.resolveStream(query, useCache=False)["url"] == "https://media/1"
+    assert downloader.knownVideoUrl(query) == videoUrl
+    assert downloader.resolveStream(query, useCache=False)["url"] == "https://media/2"
+    assert calls == [query, videoUrl]
+    fakeExtract.broken = True
+    assert downloader.resolveStream(query, useCache=False)["url"] == "https://media/1"

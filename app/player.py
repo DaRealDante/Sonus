@@ -79,6 +79,8 @@ class Player(QObject):
         from PySide6.QtCore import QThreadPool
         self.resolvePool = QThreadPool(self)
         self.resolvePool.setMaxThreadCount(3)
+        self.prefetchPool = QThreadPool(self)
+        self.prefetchPool.setMaxThreadCount(1)
         self.skipOnError = True
 
         self.loopTimer = QTimer(self)
@@ -255,17 +257,14 @@ class Player(QObject):
     def _prefetchNext(self):
         """Looks up the next streaming song in advance: when it starts (or a friend in the room skips to it)
         it plays right away instead of waiting several seconds for YouTube."""
-        nextIndex = self.currentIndex + 1
-        if not (0 <= nextIndex < len(self.queue)):
-            return
-        song = self.queue[nextIndex]
-        if not song or not isStreamPath(song.get("path") or ""):
-            return
-        target = streamTarget(song["path"])
-        if target.startswith("roomfile:"):
-            return
-        runInBackground(self.streamResolver, target, True, pool=self.resolvePool,
-                        onError=lambda message: print(f"[Stream] anticipo non riuscito: {_shortError(message)}"))
+        for song in self.queue[self.currentIndex + 1:self.currentIndex + 3]:
+            if not song or not isStreamPath(song.get("path") or ""):
+                continue
+            target = streamTarget(song["path"])
+            if target.startswith("roomfile:"):
+                continue
+            runInBackground(self.streamResolver, target, True, pool=self.prefetchPool,
+                            onError=lambda message: print(f"[Stream] anticipo non riuscito: {_shortError(message)}"))
 
     def _setLoading(self, loading):
         if loading != self.loading:

@@ -254,6 +254,13 @@ class TogetherController(QObject):
         window = queue[start:start + MAX_SHARED_QUEUE]
         tracks = [self._trackOf(song) for song in window]
         for song, track in zip(window, tracks):
+            if track.get("query") and not track.get("url") and not song.get("_roomTrack"):
+                # Already found on YouTube once: friends get the video directly and skip the search
+                from .downloader import knownVideoUrl
+                from .together_sync import youtubeId
+                knownUrl = knownVideoUrl(track["query"])
+                if youtubeId(knownUrl):
+                    track["url"] = knownUrl
             fileId = self._localFileId(song)
             if fileId and not track.get("url"):
                 track["fileId"] = fileId
