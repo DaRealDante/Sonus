@@ -1,4 +1,4 @@
-# Sonus v1.0.4
+# Sonus v1.0.5
 
 
 ## Installare / aggiornare (tu)
@@ -39,7 +39,7 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 ## Ascolta insieme (come funziona il "connetti")
 1. Bottone **persone** in basso a destra → **Crea una stanza**: il link (`sonus://join/SONUS-XXXX-XXXX`) viene copiato da solo
 2. Mandalo agli amici (anche più persone). Loro: bottone persone → incollano link o codice → **Entra**
-3. Fatto: sentite la stessa canzone nello stesso punto. Tutti possono mettere play/pausa, saltare, cercare un punto, cambiare canzone, aggiungere alla coda e cambiare velocità/reverb (valgono per tutti, non toccano i tuoi effetti salvati)
+3. Fatto: sentite la stessa canzone nello stesso punto. Tutti possono mettere play/pausa, saltare, cercare un punto, cambiare canzone, aggiungere alla coda e cambiare velocità/reverb (valgono per tutti, non toccano i tuoi effetti salvati). Il bass boost invece resta solo tuo
 
 - Le app non si mandano l'audio: si scambiano solo "quale canzone, a che secondo, play/pausa" (criptato col codice). Ognuno la suona dal suo PC: se ce l'ha già usa il file, sennò la prende in **streaming** da YouTube
 - Il collegamento passa dal **server privato di Sonus** (EMQX, piano gratuito con Spend Limit 0: non si paga mai; se finisce la quota del mese le stanze si fermano fino al mese dopo). Se la rete blocca la porta normale, l'app prova da sola quella web
@@ -60,6 +60,16 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Impostazioni → **"Non scaricare: aggiungi le canzoni solo in streaming"**: il bottone Scarica diventa *Aggiungi* (vale anche per playlist YouTube e Spotify)
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
+
+## Sonus 1.0.5
+- **Fix streaming lento (10-20 secondi) nelle stanze**: su alcuni PC Windows impiegava ~20 secondi a trovare il server di YouTube. Ora Sonus chiede l'indirizzo in parallelo anche a Google e Cloudflare e usa la prima risposta, e salta subito i server che non rispondono
+- Nella stanza la canzone scelta parte dall'inizio quando è pronta, invece di saltare i secondi di caricamento; chi la sta ancora caricando non ricomincia da capo
+- **Fix pausa "da sola"**: mentre una canzone carica il bottone mostra ⏸ (prima mostrava ▶ e cliccandolo la mettevi in pausa)
+- **Effetti generali**: velocità, reverb e bass boost valgono per tutte le canzoni e restano quando cambi canzone. Nella stanza velocità e reverb valgono per tutti, il bass boost resta personale
+- **Video delle canzoni messe dagli amici**: ora si caricano anche se stai usando un'altra app (prima solo con Sonus in primo piano)
+- Copertina (in basso a sinistra) anche per le canzoni messe dagli amici
+- Impostazioni → **FPS video** (Automatico = come prima: 12, 25 a schermo intero)
+- Colori: la Home e il banner della stanza seguono il colore principale scelto (prima restavano verdi)
 
 ## Sonus 1.0.4
 - **Fix "X ha messo in pausa" falso**: nella stanza play e pausa partono solo se qualcuno li clicca davvero; una pausa causata dall'app (caricamento, errore, ritardo) resta tua e l'app si rimette in pari da sola

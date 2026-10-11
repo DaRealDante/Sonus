@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
 
         self.togetherBanner = QFrame()
         self.togetherBanner.setObjectName("togetherBanner")
-        self.togetherBanner.setStyleSheet("QFrame#togetherBanner { background: #10391F; border-radius: 8px; }")
+        self.togetherBanner.setStyleSheet(f"QFrame#togetherBanner {{ background: {theme.ACCENT_DIM}; border-radius: 8px; }}")
         bannerLayout = QHBoxLayout(self.togetherBanner)
         bannerLayout.setContentsMargins(12, 6, 8, 6)
         bannerLayout.setSpacing(8)
@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
         self.together.effectsChanged.connect(lambda *args: self.discordTimer.start())
         self.applyDiscordSetting()
         self.applyEffectSettings()
+        self.applyVideoFps()
         QTimer.singleShot(8000, self.checkEngineUpdate)
         QTimer.singleShot(12000, lambda: self.checkAppUpdate(manual=False))
         moreMenu = self.playerBar.moreButton.menu()
@@ -295,7 +296,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
         QApplication.instance().applicationStateChanged.connect(lambda state: self._updateVideoSuspend())
         QApplication.instance().applicationStateChanged.connect(
-            lambda state: state == Qt.ApplicationActive and QTimer.singleShot(300, self.updateAmbient))
+            lambda state: state == Qt.ApplicationActive and QTimer.singleShot(300, self._refreshVideo))
         self.updateAmbient()
 
     # ---------- layout ----------
@@ -1110,18 +1111,20 @@ class MainWindow(QMainWindow):
         self.refreshCurrentPage()
         self.showStatus("Salvato nella libreria")
 
-    # ---------- speed / pitch / reverb (per song) ----------
-    def songEffects(self, song):
-        fresh = self.database.getSong(song["id"]) if song and song.get("id") else None
-        if not fresh:
-            return dict(DEFAULT_EFFECTS)
-        return {
-            "rate": float(fresh.get("songRate") or 1.0),
-            "keepPitch": bool(fresh.get("keepPitch", 1) if fresh.get("keepPitch") is not None else 1),
-            "reverbWet": float(fresh.get("reverbWet") or 0.0),
-            "reverbSize": float(fresh.get("reverbSize") or 1.8),
-            "bassBoost": float(fresh.get("bassBoost") or 0.0),
-        }
+    # ---------- speed / pitch / reverb / bass (the same for every song) ----------
+    def songEffects(self, song=None):
+        saved = settings.get("effects") or {}
+        effects = dict(DEFAULT_EFFECTS)
+        for key, default in DEFAULT_EFFECTS.items():
+            try:
+                effects[key] = bool(saved[key]) if key == "keepPitch" else float(saved[key])
+            except (KeyError, TypeError, ValueError):
+                effects[key] = default
+        return effects
+
+    def _saveEffects(self, effects):
+        settings.set("effects", {key: effects.get(key, default) for key, default in DEFAULT_EFFECTS.items()})
+        settings.save()
 
     def effectsForSong(self, song):
         return self.together.effectsFor(song) or self.songEffects(song)
@@ -1131,8 +1134,7 @@ class MainWindow(QMainWindow):
         if not current:
             self.showStatus("Avvia prima una canzone")
             return
-        roomEffects = self.together.roomEffects if self.together.inRoom() else None
-        self.effectsPopup.setSong(current, dict(roomEffects) if roomEffects else self.songEffects(current))
+        self.effectsPopup.setSong(current, self.effectsForSong(current))
         self.effectsPopup.showBelow(self.playerBar.speedButton)
 
     def _onEffectsChanged(self, effects):
@@ -1140,15 +1142,11 @@ class MainWindow(QMainWindow):
         if not current:
             return
         if self.together.inRoom():
+            # Speed and reverb go to the whole room (your saved ones stay as they are), the bass boost stays yours
+            self._saveEffects(dict(self.songEffects(), bassBoost=effects.get("bassBoost", 0.0)))
             self.together.setLocalEffects(effects)
-            self.player.setPlaybackRate(effects["rate"], effects["keepPitch"])
-            self.player.setReverb(effects["reverbWet"], effects["reverbSize"])
-            self.player.setBassBoost(effects.get("bassBoost", 0.0))
-            self.playerBar.setEffectsIndicator(effects)
-            return
-        self.database.updateSong(current["id"], songRate=effects["rate"], keepPitch=1 if effects["keepPitch"] else 0,
-                                 reverbWet=effects["reverbWet"], reverbSize=effects["reverbSize"],
-                                 bassBoost=effects.get("bassBoost", 0.0))
+        else:
+            self._saveEffects(effects)
         self.player.setPlaybackRate(effects["rate"], effects["keepPitch"])
         self.player.setReverb(effects["reverbWet"], effects["reverbSize"])
         self.player.setBassBoost(effects.get("bassBoost", 0.0))
@@ -1164,7 +1162,7 @@ class MainWindow(QMainWindow):
         if isStreamPath(song.get("path")):
             self.withLocalAudio(song, lambda prepared: self.exportWithEffects(prepared))
             return
-        effects = self.songEffects(song)
+        effects = self.effectsForSong(song)
         if abs(effects["rate"] - 1.0) < 0.005 and effects["reverbWet"] < 0.005 and effects.get("bassBoost", 0) < 0.005:
             self.showStatus("Imposta prima una velocità, il reverb o il bass boost")
             return
@@ -1282,11 +1280,30 @@ class MainWindow(QMainWindow):
         return None
 
     def _activeForVideo(self):
-        return QApplication.instance().applicationState() == Qt.ApplicationActive and not self.isMinimized()
+        # Visible is enough: a friend usually changes song while you are in another app (Discord, a game...)
+        return self.isVisible() and not self.isMinimized()
 
     def videoStreamLoading(self, song):
         return any(key.endswith(":" + str(target)) for key in self.videoResolving
                    for target in (song.get("videoUrl"), song.get("url"), str(song.get("path") or "")[len(STREAM_PREFIX):]) if target)
+
+    def _refreshVideo(self):
+        self.updateAmbient()
+        self.nowPlayingPage._loadVideo()
+
+    def applyVideoFps(self):
+        self.videoController.setFrameRate(self._videoFps(fullscreen=not self.uiVisible))
+
+    @staticmethod
+    def _videoFps(fullscreen):
+        """Frames per second of the video: chosen in Impostazioni, or automatic (12, 25 at full screen)."""
+        try:
+            chosen = int(settings.get("videoFps") or 0)
+        except (TypeError, ValueError):
+            chosen = 0
+        if chosen > 0:
+            return chosen
+        return 25 if fullscreen else 12
 
     def _onVideoStreamResolved(self, key, url):
         self.videoResolving.discard(key)
@@ -1329,6 +1346,8 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
         if event.type() in (QEvent.WindowStateChange, QEvent.ActivationChange):
             self._updateVideoSuspend()
+        if event.type() == QEvent.WindowStateChange and event.oldState() & Qt.WindowMinimized and not self.isMinimized():
+            QTimer.singleShot(300, self._refreshVideo)
 
     def _onIdle(self):
         if not self.ambientActive or not self.uiVisible or settings.get("ambientMode") != "fullscreen":
@@ -1349,7 +1368,7 @@ class MainWindow(QMainWindow):
             self.wasMaximized = self.isMaximized()
             self.enteredFullscreen = True
             self.showFullScreen()
-        self.videoController.setFrameRate(25)
+        self.videoController.setFrameRate(self._videoFps(fullscreen=True))
         self.backdrop.setActive(True, False)
 
     def _showInterface(self):
@@ -1358,7 +1377,7 @@ class MainWindow(QMainWindow):
             self.splitter.show()
             self.playerBar.show()
             self.backdrop.unsetCursor()
-            self.videoController.setFrameRate(12)
+            self.videoController.setFrameRate(self._videoFps(fullscreen=False))
             if self.enteredFullscreen:
                 self.enteredFullscreen = False
                 if self.wasMaximized:
@@ -1755,6 +1774,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == SettingsDialog.Accepted:
             self.applyDiscordSetting()
             self.applyEffectSettings()
+            self.applyVideoFps()
             self.updateAmbient()
             self.nowPlayingPage._loadVideo()
             if dialog.restartForColors:

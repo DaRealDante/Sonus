@@ -23,6 +23,8 @@ STATE_WAIT_MS = 4000
 RECOVER_FIRST_DELAY_SECONDS = 2
 RECOVER_RETRY_SECONDS = 15
 USER_ACTION_SECONDS = 2.5
+REANCHOR_MAX_MS = 8000
+COVER_LOOKAHEAD = 3
 
 _ANIMALS = ["Volpe", "Lupo", "Gufo", "Panda", "Tigre", "Delfino", "Falco", "Koala", "Lince", "Orso", "Puma", "Corvo",
             "Fenice", "Drago", "Gatto", "Riccio", "Squalo", "Cobra", "Lemure", "Bisonte"]
@@ -45,13 +47,25 @@ def ensureProfile():
         settings.save()
 
 
+def sharedEffects(effects):
+    """Only the effects that are the same for everybody in the room: speed and reverb. The bass boost stays
+    personal (it depends on your speakers/headphones)."""
+    if not effects:
+        return None
+    try:
+        return {"rate": float(effects["rate"]), "keepPitch": bool(effects["keepPitch"]),
+                "reverbWet": float(effects["reverbWet"]), "reverbSize": float(effects["reverbSize"])}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _effectsEqual(first, second):
+    first, second = sharedEffects(first), sharedEffects(second)
     if not first or not second:
         return first == second
-    return (abs(float(first["rate"]) - float(second["rate"])) < 0.001 and bool(first["keepPitch"]) == bool(second["keepPitch"])
-            and abs(float(first["reverbWet"]) - float(second["reverbWet"])) < 0.001
-            and abs(float(first["reverbSize"]) - float(second["reverbSize"])) < 0.001
-            and abs(float(first.get("bassBoost", 0.0)) - float(second.get("bassBoost", 0.0))) < 0.001)
+    return (abs(first["rate"] - second["rate"]) < 0.001 and first["keepPitch"] == second["keepPitch"]
+            and abs(first["reverbWet"] - second["reverbWet"]) < 0.001
+            and abs(first["reverbSize"] - second["reverbSize"]) < 0.001)
 
 
 class TogetherController(QObject):
@@ -85,6 +99,8 @@ class TogetherController(QObject):
         self.pendingSeek = False
         self.joinedAt = 0
         self.recovery = None
+        self.anchorKey = None
+        self.coverRequests = set()
 
         self.publishTimer = QTimer(self)
         self.publishTimer.setSingleShot(True)
@@ -112,6 +128,7 @@ class TogetherController(QObject):
         self.fileTimer.timeout.connect(self._fileMaintenance)
         self.fileTimer.start()
         player.roomFileResolver = self.resolveRoomFile
+        player.startPositionResolver = self._startPositionFor
         from PySide6.QtCore import QThreadPool
         self.uploadPool = QThreadPool(self)
         self.uploadPool.setMaxThreadCount(2)
@@ -119,7 +136,7 @@ class TogetherController(QObject):
         player.songChanged.connect(lambda song: self._onLocalChange())
         player.playingChanged.connect(lambda playing: self._onLocalChange())
         player.queueChanged.connect(self._onLocalChange)
-        player.songLoaded.connect(lambda song: self._onSongLoaded())
+        player.songLoaded.connect(self._onSongLoaded)
         player.seeked.connect(self._onLocalSeek)
 
     # ---------- identity ----------
@@ -157,6 +174,7 @@ class TogetherController(QObject):
         self.version = 0
         self.peers = {}
         self.roomEffects = None
+        self.anchorKey = None
         self.joinedAt = nowMs()
         self.waitingForState = waitForState
         self.player.skipOnError = False
@@ -193,6 +211,7 @@ class TogetherController(QObject):
         self.pingTimer.stop()
         self.waitTimer.stop()
         self.publishTimer.stop()
+        self.anchorKey = None
         hadRoomEffects = self.roomEffects is not None
         self.roomEffects = None
         if hadRoomEffects and self.player.currentSong():
@@ -215,15 +234,19 @@ class TogetherController(QObject):
 
     # ---------- effects ----------
     def effectsFor(self, song):
-        """Effects the player should use for `song` while in a room, or None outside rooms."""
+        """Effects the player should use while in a room (the room's speed/reverb + my bass boost), None outside rooms."""
         if not self.code:
             return None
-        if self.roomEffects and self.state and self._currentTrackKey(self.state) == self._keyOf(song):
-            return dict(self.roomEffects)
-        return None
+        effects = dict(self.songEffects(song))
+        if self.roomEffects:
+            effects.update(self.roomEffects)
+        return effects
 
     def setLocalEffects(self, effects):
-        self.roomEffects = dict(effects)
+        shared = sharedEffects(effects)
+        if shared is None or _effectsEqual(shared, self.roomEffects):
+            return
+        self.roomEffects = shared
         self._publishState(seek=False)
 
     def _applyEffects(self, effects):
@@ -244,10 +267,33 @@ class TogetherController(QObject):
             self.pendingSeek = True
             self.publishTimer.start()
 
-    def _onSongLoaded(self):
-        if self.code and not self.applying:
-            QTimer.singleShot(0, self._checkDrift)
-            self._onLocalChange()
+    def _onSongLoaded(self, song):
+        if not self.code:
+            return
+        self._ensureCovers()
+        if self.applying:
+            return
+        if self.anchorKey is not None and self.anchorKey == self._keyOf(song) and self.state \
+                and self.state.get("by") == self.myId() and self._currentTrackKey(self.state) == self.anchorKey:
+            # I chose this song and it was still loading: the room starts it now that I can hear it too,
+            # instead of everybody skipping the seconds it took to load.
+            self.anchorKey = None
+            self._publishState(seek=True)
+            return
+        self.anchorKey = None
+        QTimer.singleShot(0, self._checkDrift)
+        self._onLocalChange()
+
+    def _startPositionFor(self, song):
+        """Where a song that has just loaded must start: the point the room has reached now."""
+        state = self.state
+        if not self.code or not state or song is None or self._keyOf(song) != self._currentTrackKey(state):
+            return None
+        if self.anchorKey is not None and self.anchorKey == self._keyOf(song) and state.get("by") == self.myId():
+            if self._targetPosition(state) < REANCHOR_MAX_MS:
+                return 0
+            self.anchorKey = None
+        return max(0, self._targetPosition(state))
 
     def _localSnapshot(self):
         queue = self.player.queue
@@ -305,12 +351,14 @@ class TogetherController(QObject):
         tracks, index, playing = snapshot or self._localSnapshot()
         currentKey = tracks[index]["key"] if 0 <= index < len(tracks) else None
         current = self.player.currentSong()
-        if current is not None and (self.roomEffects is None or self._currentTrackKey(self.state) != currentKey):
-            self.roomEffects = self.songEffects(current)
+        if current is not None and self.roomEffects is None:
+            self.roomEffects = sharedEffects(self.songEffects(current))
         if self.player.loading:
             positionMs = 0
             if self.state and self._currentTrackKey(self.state) == currentKey:
                 positionMs = expectedPosition(self.state, nowMs(), self.clock.offset(self.state.get("by")))
+            elif currentKey is not None:
+                self.anchorKey = currentKey
         else:
             positionMs = self.player.position() + self.delayMs()
         self.version += 1
@@ -358,6 +406,7 @@ class TogetherController(QObject):
         self.pendingSeek = False
         self._applyState(state)
         self._announce(previous, state)
+        QTimer.singleShot(0, self._ensureCovers)
 
     def _announce(self, previous, state):
         who = (self.peers.get(state.get("by")) or {}).get("name") or "Qualcuno"
@@ -378,9 +427,10 @@ class TogetherController(QObject):
         try:
             queue = state.get("queue") or []
             index = int(state.get("index", -1))
-            effects = state.get("effects")
+            effects = sharedEffects(state.get("effects"))
             if effects:
-                self.roomEffects = dict(effects)
+                self.roomEffects = effects
+            self.anchorKey = None
             if not queue or not (0 <= index < len(queue)):
                 if self.player.isPlaying() and not state.get("playing"):
                     self.player.pause()
@@ -388,6 +438,12 @@ class TogetherController(QObject):
             current = self.player.currentSong()
             targetKey = queue[index]["key"]
             sameSong = current is not None and self._keyOf(current) == targetKey and not self.player.loading
+            if current is not None and self._keyOf(current) == targetKey and self.player.loading \
+                    and [self._keyOf(song) for song in self.player.queue] == [track["key"] for track in queue]:
+                # Still loading this very song: keep loading, it will start where the room is when it is ready
+                self.player.loadAutoplay = bool(state.get("playing")) and self._targetPosition(state) >= 0
+                self.player.playingChanged.emit(self.player.loadAutoplay)
+                return
             songs = []
             for position, track in enumerate(queue):
                 if position == index and sameSong:
@@ -406,9 +462,8 @@ class TogetherController(QObject):
                 return
             if effects and not _effectsEqual(effects, {"rate": self.player.playbackRate(), "keepPitch": self.player.mediaPlayer.keepPitch(),
                                                        "reverbWet": self.player.mediaPlayer.reverbWet,
-                                                       "reverbSize": self.player.mediaPlayer.reverbSize,
-                                                       "bassBoost": self.player.mediaPlayer.bassBoost}):
-                self._applyEffects(effects)
+                                                       "reverbSize": self.player.mediaPlayer.reverbSize}):
+                self._applyEffects(self.effectsFor(current))
             if self._couldNotLoad():
                 self._recoverPlayback(state, expected)
                 return
@@ -448,6 +503,36 @@ class TogetherController(QObject):
         mapped = dict(song)
         mapped["_roomTrack"] = dict(track)
         return mapped
+
+    def _ensureCovers(self):
+        """Songs put by friends arrive without a cover: take the YouTube thumbnail (current and next songs)."""
+        index = max(0, self.player.currentIndex)
+        for song in self.player.queue[index:index + COVER_LOOKAHEAD]:
+            track = song.get("_roomTrack")
+            if not track or not song.get("id") or song["id"] in self.coverRequests:
+                continue
+            fresh = self.database.getSong(song["id"])
+            if not fresh or fresh.get("cover"):
+                continue
+            from .downloader import knownVideoUrl
+            from .together_sync import youtubeId
+            videoId = youtubeId(track.get("url")) or youtubeId(fresh.get("url")) or youtubeId(knownVideoUrl(track.get("query")))
+            if not videoId:
+                continue
+            from .downloader import youtubeCover
+            self.coverRequests.add(song["id"])
+            runInBackground(youtubeCover, videoId,
+                            onFinished=lambda path, songId=song["id"]: self._onCoverReady(songId, path),
+                            onError=lambda message, songId=song["id"]: self.coverRequests.discard(songId))
+
+    def _onCoverReady(self, songId, path):
+        self.coverRequests.discard(songId)
+        if not path:
+            return
+        self.database.updateSong(songId, cover=path)
+        fresh = self.database.getSong(songId)
+        if fresh:
+            self.player.updateSongData(fresh)
 
     def _checkDrift(self):
         state = self.state

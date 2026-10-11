@@ -511,6 +511,13 @@ class SettingsDialog(QDialog):
         self.videoQualityCombo.addItems(["480", "720", "1080"])
         self.videoQualityCombo.setCurrentText(str(settings.get("videoQuality")))
         form.addRow("Qualità video (p)", self.videoQualityCombo)
+        self.videoFpsCombo = QComboBox()
+        for value, text in self.VIDEO_FPS:
+            self.videoFpsCombo.addItem(text, value)
+        fpsIndex = self.videoFpsCombo.findData(int(settings.get("videoFps") or 0))
+        self.videoFpsCombo.setCurrentIndex(max(0, fpsIndex))
+        self.videoFpsCombo.setToolTip("Più FPS = video più fluido ma più lavoro per il PC")
+        form.addRow("FPS video", self.videoFpsCombo)
         self.pauseVideoCheck = QCheckBox("Ferma il video quando usi altre app o giochi (consigliato, evita lag)")
         self.pauseVideoCheck.setChecked(bool(settings.get("pauseVideoInBackground")))
         form.addRow("", self.pauseVideoCheck)
@@ -592,6 +599,8 @@ class SettingsDialog(QDialog):
         self.accept()
         if self.parent():
             self.parent().close()
+
+    VIDEO_FPS = ((0, "Automatico (12, 25 a schermo intero)"), (15, "15"), (24, "24"), (30, "30"), (60, "60"))
 
     COLOR_FIELDS = (("accent", "Accento"), ("background", "Sfondo pagine"), ("panel", "Pannelli"),
                     ("sidebar", "Barra e menu laterale"), ("text", "Testo"))
@@ -700,6 +709,7 @@ class SettingsDialog(QDialog):
         settings.set("discordPresence", self.discordCheck.isChecked())
         settings.set("discordClientId", "".join(character for character in self.discordIdEdit.text() if character.isdigit()))
         settings.set("videoQuality", self.videoQualityCombo.currentText())
+        settings.set("videoFps", int(self.videoFpsCombo.currentData() or 0))
         settings.set("autoLyrics", self.autoLyricsCheck.isChecked())
         settings.set("pauseVideoInBackground", self.pauseVideoCheck.isChecked())
         settings.set("autoCheckUpdates", self.autoUpdateCheck.isChecked())

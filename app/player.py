@@ -83,6 +83,7 @@ class Player(QObject):
         self.prefetchPool.setMaxThreadCount(1)
         self.skipOnError = True
         self.userActionAt = 0.0
+        self.startPositionResolver = None
 
         self.loopTimer = QTimer(self)
         self.loopTimer.setInterval(15)
@@ -240,7 +241,12 @@ class Player(QObject):
         self._startSource(song, QUrl.fromLocalFile(os.path.abspath(song["path"])), autoplay, startPosition)
 
     def _startSource(self, song, url, autoplay, startPosition, headers=None, durationHintMs=0):
-        self.pendingSeek = startPosition if startPosition > 0 else None
+        if self.startPositionResolver is not None:
+            # In a room the right point is where the others are NOW, not where they were when loading started
+            roomPosition = self.startPositionResolver(song)
+            if roomPosition is not None:
+                startPosition = roomPosition
+        self.pendingSeek = None
         if self.effectsProvider is not None:
             effects = self.effectsProvider(song)
             self.mediaPlayer.presetRate(effects["rate"], effects["keepPitch"])
@@ -250,6 +256,9 @@ class Player(QObject):
         self.mediaPlayer.sourceHeaders = dict(headers or {})
         self.mediaPlayer.durationHintMs = int(durationHintMs or 0)
         self.mediaPlayer.setSource(url)
+        if startPosition > 0:
+            # The engine waits for the audio of that point and keeps time meanwhile: no jump back when it arrives
+            self.mediaPlayer.setPosition(startPosition)
         self.songChanged.emit(song)
         if autoplay:
             self.mediaPlayer.play()
@@ -346,6 +355,7 @@ class Player(QObject):
             return
         if self.loading:
             self.loadAutoplay = not self.loadAutoplay
+            self.playingChanged.emit(self.loadAutoplay)
             return
         if self.isPlaying():
             self.mediaPlayer.pause()
@@ -361,8 +371,9 @@ class Player(QObject):
 
     def pause(self):
         self._markUserAction()
-        if self.loading:
+        if self.loading and self.loadAutoplay:
             self.loadAutoplay = False
+            self.playingChanged.emit(False)
         self.mediaPlayer.pause()
 
     def next(self, automatic=False):

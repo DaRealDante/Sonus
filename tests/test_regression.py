@@ -37,9 +37,10 @@ def test_localFilePlaysSeeksAndEffectsSave(window, localSong):
     window.player.seek(8000)
     pump(0.5)
     assert 8000 <= window.player.position() < 9500
+    from app.config import settings
     window._onEffectsChanged({"rate": 0.9, "keepPitch": False, "reverbWet": 0.3, "reverbSize": 2.5})
-    saved = window.database.getSong(localSong["id"])
-    assert abs(saved["songRate"] - 0.9) < 0.001 and saved["keepPitch"] == 0
+    saved = settings.get("effects")
+    assert abs(saved["rate"] - 0.9) < 0.001 and saved["keepPitch"] is False
     assert abs(window.player.playbackRate() - 0.9) < 0.001
     window._onEffectsChanged({"rate": 1.0, "keepPitch": True, "reverbWet": 0.0, "reverbSize": 1.8})
     window.player.pause()

@@ -152,7 +152,7 @@ class TitleDelegate(QStyledItemDelegate):
         if option.state & QStyle.State_Selected:
             painter.fillRect(option.rect, QColor(theme.HOVER))
         elif option.state & QStyle.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#1F1F1F"))
+            painter.fillRect(option.rect, QColor(theme.ROW_HOVER))
         rect = option.rect
         coverSize = rect.height() - 14
         coverRect = QRect(rect.left() + 4, rect.top() + 7, coverSize, coverSize)

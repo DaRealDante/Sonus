@@ -92,7 +92,8 @@ class VideoController(QObject):
         return self.currentPath is not None and self.currentImage is not None and not self.failed
 
     def setFrameRate(self, framesPerSecond):
-        self.frameInterval = 1 / max(5, framesPerSecond)
+        # A little under the frame time, so 30 fps from a 30 fps video does not drop every other frame
+        self.frameInterval = 0.9 / max(5, framesPerSecond)
 
     # ---------- sync with audio ----------
     def sync(self):

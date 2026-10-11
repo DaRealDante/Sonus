@@ -34,7 +34,8 @@ def resolveColors(custom):
     if not custom:
         return {"ACCENT": "#1ED760", "ACCENT_HOVER": "#3BE477", "ACCENT_TEXT": "#000000", "BACKGROUND": "#121212",
                 "SIDEBAR": "#000000", "PANEL": "#181818", "ELEVATED": "#242424", "HOVER": "#2A2A2A", "TEXT": "#FFFFFF",
-                "SUBTEXT": "#B3B3B3", "MUTED": "#6A6A6A"}
+                "SUBTEXT": "#B3B3B3", "MUTED": "#6A6A6A", "ROW_HOVER": "#1F1F1F", "LINE": "#2A2A2A", "RAISED": "#3A3A3A",
+                "ACCENT_GLOW": "#1F3B2C", "ACCENT_DIM": "#10391F"}
     colors = dict(DEFAULT_COLORS, **{key: QColor(str(value)).name().upper() for key, value in custom.items()})
     background = colors["background"]
     text = colors["text"]
@@ -47,6 +48,9 @@ def resolveColors(custom):
         "BACKGROUND": background, "SIDEBAR": colors["sidebar"], "PANEL": colors["panel"],
         "ELEVATED": _mix(colors["panel"], text, 0.07), "HOVER": _mix(colors["panel"], text, 0.10),
         "TEXT": text, "SUBTEXT": _mix(text, background, 0.30), "MUTED": _mix(text, background, 0.58),
+        "ROW_HOVER": _mix(background, text, 0.05), "LINE": _mix(background, text, 0.10), "RAISED": _mix(colors["panel"], text, 0.16),
+        # Tinted with the accent (the home page glow, the room banner): never the original green
+        "ACCENT_GLOW": _mix(background, accent, 0.20), "ACCENT_DIM": _mix(background, accent, 0.16),
     }
 
 
@@ -62,6 +66,11 @@ HOVER = _palette["HOVER"]
 TEXT = _palette["TEXT"]
 SUBTEXT = _palette["SUBTEXT"]
 MUTED = _palette["MUTED"]
+ROW_HOVER = _palette["ROW_HOVER"]
+LINE = _palette["LINE"]
+RAISED = _palette["RAISED"]
+ACCENT_GLOW = _palette["ACCENT_GLOW"]
+ACCENT_DIM = _palette["ACCENT_DIM"]
 
 STYLESHEET = f"""
 * {{ font-family: "Segoe UI Variable Text", "Segoe UI", "Inter", sans-serif; font-size: 10pt; color: {TEXT}; outline: none; }}
@@ -107,11 +116,11 @@ QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSp
 
 QTableView, QListWidget, QTreeWidget {{ background: transparent; border: none; alternate-background-color: transparent; selection-background-color: {HOVER}; selection-color: {TEXT}; }}
 QTableView::item {{ padding: 4px 8px; border: none; }}
-QTableView::item:hover, QListWidget::item:hover {{ background: #1F1F1F; }}
+QTableView::item:hover, QListWidget::item:hover {{ background: {ROW_HOVER}; }}
 QTableView::item:selected, QListWidget::item:selected {{ background: {HOVER}; }}
 QListWidget::item {{ border-radius: 6px; padding: 4px; }}
 QHeaderView {{ background: transparent; }}
-QHeaderView::section {{ background: transparent; color: {SUBTEXT}; border: none; border-bottom: 1px solid #2A2A2A; padding: 6px 8px; font-weight: 600; }}
+QHeaderView::section {{ background: transparent; color: {SUBTEXT}; border: none; border-bottom: 1px solid {LINE}; padding: 6px 8px; font-weight: 600; }}
 QTableCornerButton::section {{ background: transparent; border: none; }}
 
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 0; }}
@@ -130,16 +139,16 @@ QSlider:hover::handle:horizontal {{ background: {TEXT}; }}
 
 QMenu {{ background: {ELEVATED}; border: 1px solid #333; border-radius: 6px; padding: 4px; }}
 QMenu::item {{ padding: 7px 26px 7px 12px; border-radius: 4px; }}
-QMenu::item:selected {{ background: #3A3A3A; }}
+QMenu::item:selected {{ background: {RAISED}; }}
 QMenu::item:disabled {{ color: {MUTED}; }}
-QMenu::separator {{ height: 1px; background: #3A3A3A; margin: 4px 6px; }}
+QMenu::separator {{ height: 1px; background: {RAISED}; margin: 4px 6px; }}
 
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {ELEVATED}; color: {TEXT}; padding: 6px 16px; margin-right: 8px; border-radius: 15px; font-weight: 600; }}
 QTabBar::tab:selected {{ background: {TEXT}; color: #000; }}
 QTabBar::tab:hover:!selected {{ background: {HOVER}; }}
 
-QProgressBar {{ background: #3A3A3A; border: none; border-radius: 3px; height: 6px; text-align: center; color: transparent; }}
+QProgressBar {{ background: {RAISED}; border: none; border-radius: 3px; height: 6px; text-align: center; color: transparent; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 QCheckBox, QRadioButton {{ spacing: 8px; background: transparent; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid #8A8A8A; background: transparent; }}
@@ -147,7 +156,7 @@ QCheckBox::indicator {{ border-radius: 3px; }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QCheckBox::indicator:disabled {{ border-color: #444; }}
-QToolTip {{ background: {ELEVATED}; color: {TEXT}; border: 1px solid #3A3A3A; padding: 4px 8px; border-radius: 4px; }}
+QToolTip {{ background: {ELEVATED}; color: {TEXT}; border: 1px solid {RAISED}; padding: 4px 8px; border-radius: 4px; }}
 QDialog {{ background: {PANEL}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}

@@ -3,11 +3,10 @@ import os
 import re
 import threading
 import time
-import urllib.request
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
-from . import audio_tools, metadata
+from . import audio_tools, fast_net, metadata
 from .config import TEMP_DIR, denoExe, settings
 from .workers import runInBackground
 
@@ -208,6 +207,7 @@ def _resolveStreamLocked(target, useCache):
         "title": info.get("title") or "",
         "webpageUrl": info.get("webpage_url") or (target if isUrl(target) else ""),
     }
+    fast_net.warmUrl(streamUrl)
     if isSearch and isUrl(result["webpageUrl"]):
         _rememberMatch(target, result["webpageUrl"])
     with _streamCacheLock:
@@ -238,6 +238,7 @@ def resolveVideoStream(target, height=720):
     streamUrl = info.get("url") or ((info.get("requested_formats") or [{}])[0].get("url"))
     if not streamUrl:
         raise RuntimeError("Video non trovato")
+    fast_net.warmUrl(streamUrl)
     return streamUrl
 
 
@@ -300,9 +301,18 @@ def streamSongInfo(entry):
     }
 
 
+def youtubeCover(videoId):
+    """Square cover made from a YouTube video's thumbnail, saved like the covers of downloaded songs."""
+    for candidateUrl in (f"https://i.ytimg.com/vi/{videoId}/maxresdefault.jpg", f"https://i.ytimg.com/vi/{videoId}/hqdefault.jpg"):
+        try:
+            return metadata.saveCoverBytes(_squareCover(fetchBytes(candidateUrl)))
+        except Exception:
+            continue
+    return None
+
+
 def fetchBytes(url, timeout=15):
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with fast_net.openUrl(url, {"User-Agent": "Mozilla/5.0"}, timeout=timeout) as response:
         return response.read()
 
 

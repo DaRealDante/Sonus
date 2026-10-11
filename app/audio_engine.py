@@ -5,12 +5,12 @@ import sys
 import threading
 import time
 import urllib.error
-import urllib.request
 
 import numpy
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QMediaPlayer
 
+from . import fast_net
 from .config import ffmpegExe
 
 SAMPLE_RATE = 44100
@@ -280,10 +280,9 @@ class _Decoder(threading.Thread):
             while not self.cancelled:
                 if total is not None and position >= total:
                     return
-                request = urllib.request.Request(
-                    self.path, headers={**self.headers, "Range": f"bytes={position}-{position + STREAM_CHUNK_BYTES - 1}"})
+                rangeHeaders = {**self.headers, "Range": f"bytes={position}-{position + STREAM_CHUNK_BYTES - 1}"}
                 try:
-                    response = urllib.request.urlopen(request, timeout=STREAM_RESPONSE_TIMEOUT)
+                    response = fast_net.openUrl(self.path, rangeHeaders, timeout=STREAM_RESPONSE_TIMEOUT)
                 except urllib.error.HTTPError as error:
                     if error.code == 416:
                         return

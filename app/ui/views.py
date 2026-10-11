@@ -409,7 +409,7 @@ class HomePage(Page):
         content = QWidget()
         content.setObjectName("homeContent")
         content.setStyleSheet(
-            "QWidget#homeContent { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1F3B2C, stop:0.35 rgba(0,0,0,0)); }"
+            f"QWidget#homeContent {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {theme.ACCENT_GLOW}, stop:0.35 rgba(0,0,0,0)); }}"
         )
         self.layout_ = QVBoxLayout(content)
         self.layout_.setContentsMargins(28, 24, 28, 28)
@@ -519,7 +519,7 @@ class WebResultWidget(QFrame):
         self.entry = entry
         self.setObjectName("webResult")
         self.setStyleSheet(
-            "QFrame#webResult { background: transparent; border-radius: 6px; } QFrame#webResult:hover { background: #1F1F1F; }"
+            "QFrame#webResult { background: transparent; border-radius: 6px; } QFrame#webResult:hover { background: " + theme.ROW_HOVER + "; }"
         )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -645,7 +645,7 @@ class SpotifyRow(QFrame):
         self.page = page
         self.trackInfo = trackInfo
         self.setObjectName("spotifyRow")
-        self.setStyleSheet("QFrame#spotifyRow { border-radius: 6px; } QFrame#spotifyRow:hover { background: #1F1F1F; }")
+        self.setStyleSheet(f"QFrame#spotifyRow {{ border-radius: 6px; }} QFrame#spotifyRow:hover {{ background: {theme.ROW_HOVER}; }}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(12)

@@ -138,7 +138,9 @@ def test_roomSyncAcrossThreePeople(localBroker, toneUrl, fakeSoundCard):
 
     carla.player.next()
     assert waitFor(lambda: alice.player.currentSong()["title"] == "Seconda" and bruno.player.currentSong()["title"] == "Seconda", 10)
-    assert waitFor(lambda: abs(alice.player.playbackRate() - 1.0) < 0.001, 8)
+    pump(1.5)
+    # Effects are general: the room keeps them when the song changes
+    assert abs(alice.player.playbackRate() - 1.25) < 0.001 and abs(bruno.player.playbackRate() - 1.25) < 0.001
 
     carla.controller.leaveRoom()
     assert waitFor(lambda: "carla" not in alice.controller.peers, 8)
@@ -201,14 +203,85 @@ def test_personalDelayKeepsMeBehind(localBroker, toneUrl, fakeSoundCard):
     shutdown(alice, bruno)
 
 
-def test_bassBoostSharedInRoom(localBroker, toneUrl, fakeSoundCard):
+def test_bassBoostStaysPersonalInRoom(localBroker, toneUrl, fakeSoundCard):
     alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
-    alice.savedEffects["Bassi"] = {"rate": 1.0, "keepPitch": True, "reverbWet": 0.0, "reverbSize": 1.8, "bassBoost": 0.6}
+    alice.savedEffects["Bassi"] = {"rate": 1.1, "keepPitch": True, "reverbWet": 0.0, "reverbSize": 1.8, "bassBoost": 0.6}
+    bruno.savedEffects["Bassi"] = {"rate": 1.0, "keepPitch": True, "reverbWet": 0.0, "reverbSize": 1.8, "bassBoost": 0.2}
     songIds = [alice.database.addStreamSong("https://youtu.be/bbbbbbbbbbb", "Bassi", "X", "", 90, None)]
     alice.player.playSongs(alice.database.getSongs(songIds), 0)
     code = alice.controller.createRoom()
     bruno.controller.joinRoom(code)
-    assert waitFor(lambda: abs(bruno.player.mediaPlayer.bassBoost - 0.6) < 0.001, 15)
+    assert waitFor(lambda: bruno.player.isPlaying() and abs(bruno.player.playbackRate() - 1.1) < 0.001, 15)
+    assert abs(bruno.player.mediaPlayer.bassBoost - 0.2) < 0.001
+    alice.controller.setLocalEffects({"rate": 1.1, "keepPitch": True, "reverbWet": 0.3, "reverbSize": 1.8, "bassBoost": 0.9})
+    assert waitFor(lambda: abs(bruno.player.mediaPlayer.reverbWet - 0.3) < 0.001, 8)
+    assert abs(bruno.player.mediaPlayer.bassBoost - 0.2) < 0.001
+    assert "bassBoost" not in alice.controller.state["effects"]
+    shutdown(alice, bruno)
+
+
+def test_chooserStartsTheSongWhenReadyInsteadOfSkippingTheLoad(localBroker, toneUrl, fakeSoundCard):
+    """The song I choose takes a while to load: when it is ready it starts from the beginning for the room."""
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    songIds = [alice.database.addStreamSong(f"https://youtu.be/{index:011d}", f"Lenta {index}", "X", "", 90, None) for index in range(2)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.isPlaying(), 15)
+
+    def slowResolver(target, useCache=True):
+        time.sleep(3)
+        return {"url": toneUrl, "headers": {}, "duration": 90}
+
+    alice.player.streamResolver = slowResolver
+    alice.player.next()
+    assert waitFor(lambda: alice.player.currentSong()["title"] == "Lenta 1" and not alice.player.loading and alice.player.isPlaying(), 10)
+    assert alice.player.position() < 1500
+    assert waitFor(lambda: bruno.player.currentSong()["title"] == "Lenta 1" and bruno.player.isPlaying(), 10)
+    pump(2)
+    assert abs(alice.player.position() - bruno.player.position()) < 700
+    assert alice.player.position() < 4000
+    assert not any("pausa" in notice for notice in alice.notices + bruno.notices)
+    shutdown(alice, bruno)
+
+
+def test_friendStillLoadingTheSameSongKeepsLoading(localBroker, toneUrl, fakeSoundCard):
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    songIds = [alice.database.addStreamSong("https://youtu.be/ggggggggggg", "Attesa", "X", "", 90, None)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    calls = []
+
+    def slowResolver(target, useCache=True):
+        calls.append(target)
+        time.sleep(3)
+        return {"url": toneUrl, "headers": {}, "duration": 90}
+
+    bruno.player.streamResolver = slowResolver
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: bruno.player.loading, 10)
+    pump(0.5)
+    alice.player.seek(20000)
+    assert waitFor(lambda: bruno.player.isPlaying(), 10)
+    assert len(calls) == 1
+    assert waitFor(lambda: abs(alice.player.position() - bruno.player.position()) < 700 and bruno.player.position() > 20000, 8)
+    shutdown(alice, bruno)
+
+
+def test_friendsSongGetsItsCover(localBroker, toneUrl, fakeSoundCard, monkeypatch, tmp_path):
+    import app.downloader as downloader
+    coverPath = str(tmp_path / "cover.jpg")
+    open(coverPath, "wb").write(b"jpg")
+    asked = []
+    monkeypatch.setattr(downloader, "youtubeCover", lambda videoId: asked.append(videoId) or coverPath)
+    alice, bruno = makeMember("Alice", toneUrl), makeMember("Bruno", toneUrl)
+    songIds = [alice.database.addStreamSong("https://www.youtube.com/watch?v=ccccccccccc", "Copertina", "X", "", 90, None)]
+    alice.player.playSongs(alice.database.getSongs(songIds), 0)
+    code = alice.controller.createRoom()
+    bruno.controller.joinRoom(code)
+    assert waitFor(lambda: (bruno.player.currentSong() or {}).get("cover") == coverPath, 15)
+    assert asked == ["ccccccccccc"]
+    assert bruno.database.getSong(bruno.player.currentSong()["id"])["cover"] == coverPath
     shutdown(alice, bruno)
 
 

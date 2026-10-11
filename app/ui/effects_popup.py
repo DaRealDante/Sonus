@@ -119,7 +119,8 @@ class EffectsPopup(QFrame):
         self.sizeSlider.valueChanged.connect(self._onChanged)
         layout.addWidget(self.sizeSlider)
 
-        hint = QLabel("Le impostazioni si salvano da sole per questa canzone.")
+        hint = QLabel("Valgono per tutte le canzoni e si salvano da sole. "
+                      "In una stanza velocità e reverb cambiano per tutti, il bass boost resta solo tuo.")
         hint.setObjectName("small")
         hint.setWordWrap(True)
         layout.addWidget(hint)

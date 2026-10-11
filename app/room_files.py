@@ -7,6 +7,8 @@ import time
 import urllib.request
 import uuid
 
+from . import fast_net
+
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
 MAGIC = b"SMF1"
 BLOCK = 1024 * 1024
@@ -150,9 +152,9 @@ def uploadTemporary(path, hours="1h", endpoint=None, timeout=300):
 
 
 def downloadFile(url, outPath, timeout=120):
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Sonus"})
     received = 0
-    with urllib.request.urlopen(request, timeout=timeout) as response, open(outPath + ".part", "wb") as target:
+    with fast_net.openUrl(url, {"User-Agent": "Mozilla/5.0 Sonus"}, timeout=timeout) as response, \
+            open(outPath + ".part", "wb") as target:
         for block in iter(lambda: response.read(BLOCK), b""):
             received += len(block)
             if received > MAX_DOWNLOAD_BYTES:

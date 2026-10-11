@@ -419,6 +419,13 @@ class PlayerBar(QFrame):
             self.artistLabel.setText("Caricamento in streaming...")
         elif song:
             self.artistLabel.setText(song.get("artist") or "Artista sconosciuto")
+        self._updatePlayIcon()
+
+    def _updatePlayIcon(self):
+        # While a song loads it will start by itself: the button shows pause, so a click really stops it
+        willPlay = self.player.isPlaying() or (self.player.loading and self.player.loadAutoplay)
+        self.playButton.setIcon(theme.icon("pause" if willPlay else "play", "#000000", 18))
+        self.playButton.setToolTip("Pausa (Spazio)" if willPlay else "Riproduci (Spazio)")
 
     def setFavorite(self, isFavorite, animate=True):
         if animate and isFavorite and not self.favoriteState:
@@ -428,8 +435,7 @@ class PlayerBar(QFrame):
         self.favoriteButton.setToolTip("Rimuovi dai preferiti" if isFavorite else "Salva nei preferiti")
 
     def onPlayingChanged(self, isPlaying):
-        self.playButton.setIcon(theme.icon("pause" if isPlaying else "play", "#000000", 18))
-        self.playButton.setToolTip("Pausa (Spazio)" if isPlaying else "Riproduci (Spazio)")
+        self._updatePlayIcon()
         if not isPlaying and not self.player.stopAfterCurrent and self.timerButton.toolTip().startswith("La musica si fermerà alla"):
             self._cancelSleep()
         if not isPlaying and not self.sleepTimer.isActive() and self.timerButton.toolTip().startswith("La musica si fermerà tra"):

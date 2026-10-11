@@ -345,8 +345,14 @@ class FullscreenHost(QWidget):
         self.hideTimer.timeout.connect(self._hideControls)
         player.positionChanged.connect(self._onPosition)
         player.durationChanged.connect(lambda duration: (self.slider.setRange(0, duration), self.durationLabel.setText(theme.formatTime(duration))))
-        player.playingChanged.connect(lambda playing: self.playButton.setIcon(theme.icon("pause" if playing else "play", theme.TEXT, 22)))
+        player.playingChanged.connect(lambda playing: self._updatePlayIcon())
+        player.loadingChanged.connect(lambda loading: self._updatePlayIcon())
         player.songChanged.connect(lambda song: self.titleLabel.setText(f"{song.get('title')} · {song.get('artist') or ''}" if song else ""))
+
+    def _updatePlayIcon(self):
+        player = self.view.window.player
+        willPlay = player.isPlaying() or (player.loading and player.loadAutoplay)
+        self.playButton.setIcon(theme.icon("pause" if willPlay else "play", theme.TEXT, 22))
 
     def _onPosition(self, position):
         if not self.slider.isSliderDown():
@@ -357,7 +363,7 @@ class FullscreenHost(QWidget):
         player = self.view.window.player
         self.slider.setRange(0, player.duration())
         self.durationLabel.setText(theme.formatTime(player.duration()))
-        self.playButton.setIcon(theme.icon("pause" if player.isPlaying() else "play", theme.TEXT, 22))
+        self._updatePlayIcon()
         song = player.currentSong()
         self.titleLabel.setText(f"{song.get('title')} · {song.get('artist') or ''}" if song else "")
         QApplication.instance().installEventFilter(self)
