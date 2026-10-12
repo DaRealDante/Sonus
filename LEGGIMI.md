@@ -1,4 +1,4 @@
-# Sonus v1.0.7
+# Sonus v1.0.8
 
 
 ## Installare / aggiornare (tu)
@@ -60,6 +60,10 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Impostazioni → **"Non scaricare: aggiungi le canzoni solo in streaming"**: il bottone Scarica diventa *Aggiungi* (vale anche per playlist YouTube e Spotify)
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
+
+## Sonus 1.0.8
+- Fix video che a volte non partiva (YouTube rispondeva "403"): ora il video viene chiesto con gli stessi dati che vuole YouTube
+- Fix errore all'avvio nel log ("mediaHotkeys")
 
 ## Sonus 1.0.7
 - **Fix video che si bloccava ogni 2-5 secondi**: quando restava un po' indietro rispetto alla musica, il video veniva fatto saltare avanti e ogni salto lo ricaricava (blocco). Ora le piccole differenze si recuperano accelerando o rallentando il video di poco, senza salti

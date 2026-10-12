@@ -157,6 +157,9 @@ def _ensureServer():
 def localUrl(url, headers=None):
     """Address on this PC the video player can open instead of the YouTube one."""
     server = _ensureServer()
+    if headers is None:
+        from .downloader import videoHeaders
+        headers = videoHeaders(url)
     token = hashlib.sha1(url.encode("utf-8")).hexdigest()[:20]
     with _lock:
         _targets[token] = (url, dict(headers or {}))

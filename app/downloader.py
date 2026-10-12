@@ -217,6 +217,12 @@ def _resolveStreamLocked(target, useCache):
 
 
 STREAM_CACHE_FILES = 8
+_videoHeaders = {}
+
+
+def videoHeaders(url):
+    """Headers YouTube wants with a video link (without them it can answer 403)."""
+    return dict(_videoHeaders.get(url) or {})
 
 
 def resolveVideoStream(target, height=720):
@@ -235,9 +241,15 @@ def resolveVideoStream(target, height=720):
         if not entries:
             raise RuntimeError("Nessun video trovato")
         info = entries[0]
-    streamUrl = info.get("url") or ((info.get("requested_formats") or [{}])[0].get("url"))
+    chosen = info if info.get("url") else (info.get("requested_formats") or [{}])[0]
+    streamUrl = chosen.get("url")
     if not streamUrl:
         raise RuntimeError("Video non trovato")
+    with _streamCacheLock:
+        _videoHeaders[streamUrl] = dict(chosen.get("http_headers") or info.get("http_headers") or {})
+        if len(_videoHeaders) > 100:
+            for oldUrl in list(_videoHeaders)[:20]:
+                _videoHeaders.pop(oldUrl, None)
     fast_net.warmUrl(streamUrl)
     return streamUrl
 

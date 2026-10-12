@@ -1930,7 +1930,7 @@ class MainWindow(QMainWindow):
             self.mediaHotkeys = {}
 
     def nativeEvent(self, eventType, message):
-        if self.mediaHotkeys and bytes(eventType) == b"windows_generic_MSG":
+        if getattr(self, "mediaHotkeys", None) and bytes(eventType) == b"windows_generic_MSG":
             try:
                 import ctypes.wintypes
                 msg = ctypes.wintypes.MSG.from_address(int(message))
