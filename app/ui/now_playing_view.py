@@ -13,7 +13,7 @@ from ..config import APP_NAME, settings
 from ..lyrics import parseSynced
 from . import theme
 from .player_bar import ClickSlider
-from .video_controller import FrameView
+from .video_controller import FrameView, coverImage, drawCover
 from .effects import ColorFader, Visualizer
 from .views import ElidedLabel, Page, _iconButton, _label
 
@@ -243,6 +243,29 @@ class LyricsView(QWidget):
             painter.drawText(QRectF(32, top, width, lineHeight + 4), Qt.TextWordWrap | Qt.AlignLeft, line)
 
 
+class CoverPanel(QWidget):
+    """Shown when the song has no video: its cover, with the buttons to find one underneath."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.coverPath = None
+        self.bottomSpace = 0
+
+    def setCover(self, coverPath):
+        self.coverPath = coverPath
+        self.update()
+
+    def paintEvent(self, event):
+        image = coverImage(self.coverPath)
+        if image is None:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        margin = min(self.width(), self.height()) // 12
+        drawCover(painter, self.rect().adjusted(margin, margin, -margin, -margin - self.bottomSpace), image, fit=True)
+        painter.end()
+
+
 class VideoPane(QWidget):
     def __init__(self, view):
         super().__init__()
@@ -254,7 +277,8 @@ class VideoPane(QWidget):
         self.stack = QStackedLayout(self)
         self.frameView = FrameView(self.controller)
         self.stack.addWidget(self.frameView)
-        emptyWidget = QWidget()
+        emptyWidget = CoverPanel()
+        self.coverPanel = emptyWidget
         emptyLayout = QVBoxLayout(emptyWidget)
         emptyLayout.addStretch()
         self.emptyLabel = _label("Nessun video per questa canzone", "h3")
@@ -271,7 +295,9 @@ class VideoPane(QWidget):
         buttonsRow.addWidget(fileButton)
         buttonsRow.addStretch()
         emptyLayout.addLayout(buttonsRow)
+        self.emptyStretch = emptyLayout.count()
         emptyLayout.addStretch()
+        self.emptyLayout = emptyLayout
         self.stack.addWidget(emptyWidget)
         self.currentPath = None
         self.controller.stateChanged.connect(self._onControllerState)
@@ -287,6 +313,18 @@ class VideoPane(QWidget):
     def _onControllerState(self):
         if self.currentPath and self.controller.failed and self.controller.currentPath == self.currentPath:
             self.showEmpty("Video non riproducibile")
+
+    def setCover(self, coverPath):
+        coverPath = coverPath if coverPath and os.path.isfile(coverPath) else None
+        self.frameView.setCover(coverPath)
+        self.coverPanel.setCover(coverPath)
+        # With a cover the text and buttons stay small at the bottom, under it
+        self.emptyLabel.setObjectName("small" if coverPath else "h3")
+        self.emptyLabel.style().unpolish(self.emptyLabel)
+        self.emptyLabel.style().polish(self.emptyLabel)
+        self.emptyLayout.setStretch(0, 1)
+        self.emptyLayout.setStretch(self.emptyStretch, 0 if coverPath else 1)
+        self.coverPanel.bottomSpace = 90 if coverPath else 0
 
     def showEmpty(self, text):
         self.release()
@@ -529,9 +567,11 @@ class NowPlayingView(Page):
     def setSong(self, song, force=False):
         fresh = self.window.database.getSong(song["id"]) if song and song.get("id") else song
         if not force and self.song and fresh and self.song.get("id") == fresh.get("id") and \
-                self.song.get("lyrics") == fresh.get("lyrics") and self.song.get("videoPath") == fresh.get("videoPath"):
+                self.song.get("lyrics") == fresh.get("lyrics") and self.song.get("videoPath") == fresh.get("videoPath") \
+                and self.song.get("cover") == fresh.get("cover"):
             return
         self.song = fresh
+        self.videoPane.setCover(fresh.get("cover") if fresh else None)
         if not fresh:
             self.titleLabel.setText("Nessuna canzone")
             self.artistLabel.setText("")

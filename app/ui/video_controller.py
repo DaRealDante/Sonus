@@ -2,9 +2,15 @@ import os
 import time
 
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import QWidget
+
+from .. import video_proxy
+
+STALL_SECONDS = 4
+FIRST_FRAME_SECONDS = 12
+SEEK_GAP_SECONDS = 2
 
 
 def isRemote(path):
@@ -33,6 +39,10 @@ class VideoController(QObject):
         self.frameInterval = 1 / 12
         self.failed = False
         self.suspended = False
+        self.loadedAt = 0.0
+        self.lastSeekAt = 0.0
+        self.retried = False
+        self.audioWasPlaying = False
         self.syncTimer = QTimer(self)
         self.syncTimer.setInterval(200)
         self.syncTimer.timeout.connect(self.sync)
@@ -60,9 +70,10 @@ class VideoController(QObject):
         self.currentPath = wantedPath
         self.currentImage = None
         self.failed = False
+        self.retried = False
         self.mediaPlayer.stop()
         if wantedPath:
-            self.mediaPlayer.setSource(QUrl(wantedPath) if isRemote(wantedPath) else QUrl.fromLocalFile(os.path.abspath(wantedPath)))
+            self._setSource(wantedPath)
             if self.suspended:
                 self.mediaPlayer.play()
                 QTimer.singleShot(150, lambda: self.suspended and self.mediaPlayer.pause())
@@ -72,6 +83,36 @@ class VideoController(QObject):
         else:
             self.mediaPlayer.setSource(QUrl())
             self.syncTimer.stop()
+        self.stateChanged.emit()
+        self.frameReady.emit()
+
+    def _setSource(self, path):
+        self.loadedAt = time.monotonic()
+        self.lastSeekAt = 0.0
+        if isRemote(path):
+            print("[Video] carico il video in streaming")
+            self.mediaPlayer.setSource(QUrl(video_proxy.localUrl(path)))
+        else:
+            self.mediaPlayer.setSource(QUrl.fromLocalFile(os.path.abspath(path)))
+
+    def _checkStall(self):
+        """A streaming video that stops sending frames while the music plays: reload it once, then give up
+        (the cover is shown instead of a frozen picture)."""
+        now = time.monotonic()
+        lastProgress = max(self.lastFrameTime, self.loadedAt)
+        limit = FIRST_FRAME_SECONDS if self.currentImage is None else STALL_SECONDS
+        if now - lastProgress < limit:
+            return
+        if not self.retried:
+            print("[Video] il video si è bloccato: lo ricarico")
+            self.retried = True
+            self.mediaPlayer.stop()
+            self._setSource(self.currentPath)
+            self.mediaPlayer.play()
+            return
+        print("[Video] il video non va: mostro la copertina")
+        self.failed = True
+        self.mediaPlayer.stop()
         self.stateChanged.emit()
         self.frameReady.emit()
 
@@ -85,6 +126,7 @@ class VideoController(QObject):
             if self.mediaPlayer.playbackState() == QMediaPlayer.PlayingState:
                 self.mediaPlayer.pause()
         elif self.currentPath:
+            self.loadedAt = time.monotonic()
             self.syncTimer.start()
             self.sync()
 
@@ -97,9 +139,13 @@ class VideoController(QObject):
 
     # ---------- sync with audio ----------
     def sync(self):
-        if not self.currentPath or self.suspended:
+        if not self.currentPath or self.suspended or self.failed:
             return
         audioPlaying = self.player.isPlaying()
+        now = time.monotonic()
+        if audioPlaying and not self.audioWasPlaying:
+            self.loadedAt = now
+        self.audioWasPlaying = audioPlaying
         videoState = self.mediaPlayer.playbackState()
         duration = self.mediaPlayer.duration()
         target = self.player.position()
@@ -110,8 +156,15 @@ class VideoController(QObject):
         drift = abs(self.mediaPlayer.position() - target)
         if duration > 0:
             drift = min(drift, duration - drift)
-        if drift > 300:
+        if drift > 300 and now - self.lastSeekAt > SEEK_GAP_SECONDS:
+            # Not more often than this: every jump makes a streaming video load again, and it froze
+            self.lastSeekAt = now
+            self.loadedAt = max(self.loadedAt, now)
             self.mediaPlayer.setPosition(target)
+        if audioPlaying:
+            self._checkStall()
+            if self.failed:
+                return
         if audioPlaying and videoState != QMediaPlayer.PlayingState:
             self.mediaPlayer.play()
         elif not audioPlaying and videoState == QMediaPlayer.PlayingState:
@@ -139,8 +192,10 @@ class VideoController(QObject):
 
     def _onError(self, error, message):
         if error != QMediaPlayer.NoError:
+            print(f"[Video] errore del video: {message}")
             self.failed = True
             self.stateChanged.emit()
+            self.frameReady.emit()
 
 
 def drawCover(painter, rect, image, fit=False):
@@ -168,13 +223,45 @@ def drawCover(painter, rect, image, fit=False):
     painter.drawImage(QRectF(rect), image, source)
 
 
+_coverCache = {}
+
+
+def coverImage(path, blurred=False):
+    """The song's cover as an image (blurred = made soft, for a full-window background)."""
+    if not path or not os.path.isfile(path):
+        return None
+    key = (path, blurred)
+    if key not in _coverCache:
+        image = QImage(path)
+        if image.isNull():
+            return None
+        if blurred:
+            image = image.scaled(48, 48, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        if len(_coverCache) > 20:
+            _coverCache.clear()
+        _coverCache[key] = image
+    return _coverCache[key]
+
+
+def videoImage(controller):
+    """The current video frame, or None when there is no (working) video."""
+    if controller.failed or controller.currentPath is None:
+        return None
+    return controller.currentImage
+
+
 class FrameView(QWidget):
-    """Shows the controller's current frame, letterboxed on black."""
+    """Shows the controller's current frame, letterboxed on black; the song's cover while there is no video."""
 
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
+        self.coverPath = None
         controller.frameReady.connect(self._onFrame)
+
+    def setCover(self, coverPath):
+        self.coverPath = coverPath
+        self.update()
 
     def _onFrame(self):
         if self.isVisible():
@@ -184,7 +271,12 @@ class FrameView(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000"))
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        drawCover(painter, self.rect(), self.controller.currentImage, fit=True)
+        image = videoImage(self.controller)
+        if image is None:
+            margin = min(self.width(), self.height()) // 10
+            drawCover(painter, self.rect().adjusted(margin, margin, -margin, -margin), coverImage(self.coverPath), fit=True)
+        else:
+            drawCover(painter, self.rect(), image, fit=True)
         painter.end()
 
 
@@ -196,9 +288,15 @@ class BackdropWidget(QWidget):
         self.controller = controller
         self.active = False
         self.uiVisible = True
+        self.coverPath = None
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setAutoFillBackground(False)
         controller.frameReady.connect(self._onFrame)
+
+    def setCover(self, coverPath):
+        if coverPath != self.coverPath:
+            self.coverPath = coverPath
+            self.update()
 
     def setActive(self, active, uiVisible):
         changed = active != self.active or uiVisible != self.uiVisible
@@ -214,9 +312,18 @@ class BackdropWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000"))
-        if self.active and self.controller.currentImage is not None:
+        image = videoImage(self.controller) if self.active else None
+        if self.active and image is None:
+            # No video: the song's cover, soft and darker, instead
+            image = coverImage(self.coverPath, blurred=True)
+            if image is not None:
+                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                drawCover(painter, self.rect(), image)
+                painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+                image = None
+        if image is not None:
             painter.setRenderHint(QPainter.SmoothPixmapTransform, not self.uiVisible)
-            drawCover(painter, self.rect(), self.controller.currentImage)
+            drawCover(painter, self.rect(), image)
             if self.uiVisible:
                 painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
         painter.end()

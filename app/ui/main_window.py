@@ -1320,7 +1320,11 @@ class MainWindow(QMainWindow):
             self.videoController.request("backdrop", videoPath)
         else:
             self.videoController.release("backdrop")
-        active = wanted and self.videoController.hasFrames()
+        coverPath = song.get("cover") if song else None
+        self.backdrop.setCover(coverPath if coverPath and os.path.isfile(coverPath) else None)
+        # No video (or it does not work): the song's cover is the background instead
+        active = settings.get("ambientMode") != "off" and song is not None and \
+            ((wanted and self.videoController.hasFrames()) or self.backdrop.coverPath is not None)
         if active != self.ambientActive:
             self.ambientActive = active
             application = QApplication.instance()
@@ -1350,7 +1354,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, self._refreshVideo)
 
     def _onIdle(self):
-        if not self.ambientActive or not self.uiVisible or settings.get("ambientMode") != "fullscreen":
+        if not self.ambientActive or not self.uiVisible or settings.get("ambientMode") != "fullscreen" \
+                or not self.videoController.hasFrames():
             return
         application = QApplication.instance()
         if (not self.isActiveWindow() or application.activePopupWidget() or application.activeModalWidget()

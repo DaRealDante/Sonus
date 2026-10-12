@@ -118,3 +118,24 @@ def test_copyDiagnosticsFromRoom(window):
     assert text.startswith("Synth Music ") and "CONNESSO" in text and "Stanza: sì" in text
     window.together.leaveRoom()
     window.togetherPopup.hide()
+
+
+def test_coverIsShownWhenThereIsNoVideo(window, tmp_path):
+    from PySide6.QtGui import QImage, QColor
+    from app.config import settings
+    coverPath = str(tmp_path / "cover.png")
+    image = QImage(64, 64, QImage.Format_RGB32)
+    image.fill(QColor("#ff0000"))
+    image.save(coverPath)
+    songId = window.database.addStreamSong("https://youtu.be/hhhhhhhhhhh", "Senza video", "", "", 100, coverPath)
+    window.player.streamResolver = lambda target, useCache=True: (_ for _ in ()).throw(RuntimeError("offline"))
+    previousMode = settings.get("ambientMode")
+    settings.set("streamVideo", False)
+    window.player.restoreSession([window.database.getSong(songId)], 0, 0)
+    window.setAmbientMode("background")
+    window.updateAmbient()
+    assert window.backdrop.coverPath == coverPath and window.ambientActive
+    window.nowPlayingPage.setSong(window.database.getSong(songId), force=True)
+    assert window.nowPlayingPage.videoPane.coverPanel.coverPath == coverPath
+    window.setAmbientMode(previousMode or "off")
+    settings.set("streamVideo", True)
