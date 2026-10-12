@@ -1,4 +1,4 @@
-# Sonus v1.0.6
+# Sonus v1.0.7
 
 
 ## Installare / aggiornare (tu)
@@ -60,6 +60,10 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Impostazioni → **"Non scaricare: aggiungi le canzoni solo in streaming"**: il bottone Scarica diventa *Aggiungi* (vale anche per playlist YouTube e Spotify)
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
+
+## Sonus 1.0.7
+- **Fix video che si bloccava ogni 2-5 secondi**: quando restava un po' indietro rispetto alla musica, il video veniva fatto saltare avanti e ogni salto lo ricaricava (blocco). Ora le piccole differenze si recuperano accelerando o rallentando il video di poco, senza salti
+- Il video viene scaricato in anticipo (~24 MB): un pezzo lento da YouTube non si vede più
 
 ## Sonus 1.0.6
 - **Fix video in streaming bloccato o assente**: il video ora arriva a pezzi passando da Sonus (come l'audio), quindi YouTube non lo rallenta più e non aspetta il DNS lento di Windows. Se si blocca lo ricarica da solo

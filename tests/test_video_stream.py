@@ -121,3 +121,58 @@ def test_frozenVideoGivesUpAndShowsTheCover(videoServer, monkeypatch):
         controller.unload()
     finally:
         RangeHandler.hang = False
+
+
+def _countSeeks(controller):
+    seeks = []
+    original = controller.mediaPlayer.setPosition
+    controller.mediaPlayer.setPosition = lambda position: (seeks.append(position), original(position))
+    return seeks
+
+
+def _frameGaps(controller, seconds):
+    application = QApplication.instance()
+    gaps, last = [], None
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        application.processEvents()
+        if controller.lastFrameTime != last:
+            if last:
+                gaps.append(controller.lastFrameTime - last)
+            last = controller.lastFrameTime
+        time.sleep(0.005)
+    return gaps
+
+
+def test_slowYoutubeDoesNotFreezeTheVideo(videoServer, monkeypatch):
+    """YouTube answering each piece late made the video jump every 2 s, and every jump was a freeze."""
+    from app import video_proxy
+    from app.ui.video_controller import VideoController
+    monkeypatch.setattr(video_proxy, "CHUNK_BYTES", 256 * 1024)
+    original = RangeHandler.do_GET
+    monkeypatch.setattr(RangeHandler, "do_GET", lambda self: (time.sleep(0.6), original(self)))
+    controller = VideoController(FakePlayer())
+    seeks = _countSeeks(controller)
+    controller.request("pane", videoServer + "?slow=1")
+    assert waitFor(lambda: controller.hasFrames(), 15)
+    gaps = _frameGaps(controller, 10)
+    assert seeks == []
+    assert max(gaps) < 0.4, max(gaps)
+    assert abs(controller.mediaPlayer.position() - controller.player.position()) < 700
+    controller.unload()
+
+
+def test_realJumpMovesTheVideoOnce(videoServer):
+    from app.ui.video_controller import VideoController
+    player = FakePlayer()
+    controller = VideoController(player)
+    seeks = _countSeeks(controller)
+    controller.request("pane", videoServer + "?jump=1")
+    assert waitFor(lambda: controller.hasFrames(), 15)
+    _frameGaps(controller, 1)
+    player.startedAt -= 9
+    assert waitFor(lambda: len(seeks) == 1, 3)
+    _frameGaps(controller, 2)
+    assert len(seeks) == 1
+    assert waitFor(lambda: abs(controller.mediaPlayer.position() - player.position()) < 700, 6)
+    controller.unload()

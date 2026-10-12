@@ -1,5 +1,6 @@
 import hashlib
 import http.server
+import queue
 import re
 import threading
 import time
@@ -8,7 +9,8 @@ import urllib.error
 from . import fast_net
 
 CHUNK_BYTES = 8 * 1024 * 1024
-READ_BYTES = 64 * 1024
+READ_BYTES = 256 * 1024
+AHEAD_BLOCKS = 96  # ~24 MB downloaded ahead of the player: a slow piece from YouTube is never seen as a freeze
 RESPONSE_TIMEOUT = 8
 MAX_FAILURES = 4
 
@@ -17,9 +19,86 @@ _server = None
 _targets = {}
 
 
+def _download(url, headers, start, end, blocks, stop):
+    """Worker thread: fetches the video from YouTube in pieces, as fast as it can, ahead of the player."""
+
+    def put(item):
+        while not stop.is_set():
+            try:
+                blocks.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    position = start
+    total = None
+    failures = 0
+    while not stop.is_set() and (end is None or position <= end):
+        last = position + CHUNK_BYTES - 1 if end is None else min(end, position + CHUNK_BYTES - 1)
+        try:
+            response = fast_net.openUrl(url, {**headers, "Range": f"bytes={position}-{last}"}, timeout=RESPONSE_TIMEOUT)
+        except urllib.error.HTTPError as error:
+            if total is not None and error.code == 416:
+                break
+            failures += 1
+            if total is None and (error.code in (403, 404, 410, 416) or failures > MAX_FAILURES):
+                print(f"[Video] YouTube ha rifiutato il video (HTTP {error.code})")
+                put(("error", error.code))
+                return
+            if failures > MAX_FAILURES:
+                break
+            time.sleep(0.5 * failures)
+            continue
+        except Exception as error:
+            failures += 1
+            if failures > MAX_FAILURES:
+                print(f"[Video] YouTube non risponde: {error}")
+                put(("error", 504) if total is None else ("end", None))
+                return
+            continue
+        received = 0
+        with response:
+            if total is None:
+                contentRange = response.headers.get("Content-Range") or ""
+                if "/" in contentRange and contentRange.rsplit("/", 1)[1].strip().isdigit():
+                    total = int(contentRange.rsplit("/", 1)[1])
+                elif (response.headers.get("Content-Length") or "").isdigit():
+                    total = position + int(response.headers["Content-Length"])
+                if total is None:
+                    put(("error", 502))
+                    return
+                end = total - 1 if end is None else min(end, total - 1)
+                if not put(("meta", (total, end, response.headers.get("Content-Type") or "video/mp4"))):
+                    return
+            try:
+                while not stop.is_set() and position <= end:
+                    data = response.read(min(READ_BYTES, end - position + 1))
+                    if not data:
+                        break
+                    if not put(("data", data)):
+                        return
+                    position += len(data)
+                    received += len(data)
+            except Exception:
+                failures += 1
+                if failures > MAX_FAILURES:
+                    break
+                continue
+        if received:
+            failures = 0
+        elif response.status == 200:
+            break
+        else:
+            failures += 1
+            if failures > MAX_FAILURES:
+                break
+    put(("end", None))
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     """Gives the video player the YouTube video through 127.0.0.1: the video is fetched in pieces (YouTube slows
-    down or cuts one giant request, and the video froze) and without waiting for a slow Windows DNS."""
+    down or cuts one giant request), ahead of time and without waiting for a slow Windows DNS."""
 
     protocol_version = "HTTP/1.1"
 
@@ -35,77 +114,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         match = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range") or "")
         start = int(match.group(1)) if match and match.group(1) else 0
         end = int(match.group(2)) if match and match.group(2) else None
-        position = start
-        total = None
-        failures = 0
-        sentHeaders = False
-        while not sentHeaders or position <= end:
-            last = position + CHUNK_BYTES - 1 if end is None else min(end, position + CHUNK_BYTES - 1)
-            try:
-                response = fast_net.openUrl(url, {**headers, "Range": f"bytes={position}-{last}"}, timeout=RESPONSE_TIMEOUT)
-            except urllib.error.HTTPError as error:
-                if error.code == 416 and sentHeaders:
-                    return
-                if not sentHeaders and (error.code in (403, 404, 410, 416) or failures >= MAX_FAILURES):
-                    print(f"[Video] YouTube ha rifiutato il video (HTTP {error.code})")
-                    self.send_error(error.code)
-                    return
-                failures += 1
-                time.sleep(0.5 * failures)
-                if failures > MAX_FAILURES:
-                    return
-                continue
-            except Exception as error:
-                failures += 1
-                if failures > MAX_FAILURES:
-                    print(f"[Video] YouTube non risponde: {error}")
-                    if not sentHeaders:
-                        self.send_error(504)
-                    return
-                continue
-            with response:
-                if not sentHeaders:
-                    contentRange = response.headers.get("Content-Range") or ""
-                    if "/" in contentRange and contentRange.rsplit("/", 1)[1].strip().isdigit():
-                        total = int(contentRange.rsplit("/", 1)[1])
-                    elif response.headers.get("Content-Length", "").isdigit():
-                        total = int(response.headers["Content-Length"])
-                    if total is None:
-                        self.send_error(502)
-                        return
-                    end = total - 1 if end is None else min(end, total - 1)
-                    self.send_response(206 if match else 200)
-                    self.send_header("Content-Type", response.headers.get("Content-Type") or "video/mp4")
-                    self.send_header("Accept-Ranges", "bytes")
-                    if match:
-                        self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
-                    self.send_header("Content-Length", str(end - start + 1))
-                    self.end_headers()
-                    sentHeaders = True
-                received = 0
-                try:
-                    while position <= end:
-                        data = response.read(min(READ_BYTES, end - position + 1))
-                        if not data:
-                            break
-                        self.wfile.write(data)
-                        position += len(data)
-                        received += len(data)
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as error:
-                    if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
-                        return
-                    failures += 1
-                    if failures > MAX_FAILURES:
-                        return
-                    continue
-            if received:
-                failures = 0
-            elif response.status == 200:
+        blocks = queue.Queue(maxsize=AHEAD_BLOCKS)
+        stop = threading.Event()
+        threading.Thread(target=_download, args=(url, headers, start, end, blocks, stop), daemon=True).start()
+        try:
+            kind, value = blocks.get(timeout=RESPONSE_TIMEOUT * (MAX_FAILURES + 1))
+            if kind == "error":
+                self.send_error(value)
                 return
-            else:
-                failures += 1
-                if failures > MAX_FAILURES:
+            if kind != "meta":
+                self.send_error(502)
+                return
+            total, end, contentType = value
+            self.send_response(206 if match else 200)
+            self.send_header("Content-Type", contentType)
+            self.send_header("Accept-Ranges", "bytes")
+            if match:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.end_headers()
+            while True:
+                kind, value = blocks.get(timeout=RESPONSE_TIMEOUT * (MAX_FAILURES + 1))
+                if kind != "data":
                     return
+                self.wfile.write(value)
+        except (queue.Empty, BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            return
+        finally:
+            stop.set()
 
 
 def _ensureServer():

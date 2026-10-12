@@ -10,7 +10,13 @@ from .. import video_proxy
 
 STALL_SECONDS = 4
 FIRST_FRAME_SECONDS = 12
-SEEK_GAP_SECONDS = 2
+# Jumping in a streaming video makes it load again (a freeze): small differences are fixed by playing the video a
+# little faster or slower, only a real jump (seek, song restarted, room) moves it.
+HARD_SEEK_MS = 2500
+AUDIO_JUMP_MS = 1500
+SEEK_SETTLE_SECONDS = 3
+NUDGE_DEADBAND_MS = 120
+NUDGE_MAX = 0.12
 
 
 def isRemote(path):
@@ -43,6 +49,7 @@ class VideoController(QObject):
         self.lastSeekAt = 0.0
         self.retried = False
         self.audioWasPlaying = False
+        self.lastAudio = None
         self.syncTimer = QTimer(self)
         self.syncTimer.setInterval(200)
         self.syncTimer.timeout.connect(self.sync)
@@ -148,19 +155,29 @@ class VideoController(QObject):
         self.audioWasPlaying = audioPlaying
         videoState = self.mediaPlayer.playbackState()
         duration = self.mediaPlayer.duration()
-        target = self.player.position()
-        if duration > 0:
-            target = target % duration
-        if abs(self.mediaPlayer.playbackRate() - self.player.playbackRate()) > 0.01:
-            self.mediaPlayer.setPlaybackRate(self.player.playbackRate())
-        drift = abs(self.mediaPlayer.position() - target)
-        if duration > 0:
-            drift = min(drift, duration - drift)
-        if drift > 300 and now - self.lastSeekAt > SEEK_GAP_SECONDS:
-            # Not more often than this: every jump makes a streaming video load again, and it froze
+        audioPosition = self.player.position()
+        baseRate = self.player.playbackRate()
+        audioJumped = False
+        if self.lastAudio is not None:
+            lastPosition, lastTime, wasPlaying = self.lastAudio
+            expected = lastPosition + ((now - lastTime) * 1000 * baseRate if wasPlaying else 0)
+            audioJumped = abs(audioPosition - expected) > AUDIO_JUMP_MS
+        self.lastAudio = (audioPosition, now, audioPlaying)
+        target = audioPosition % duration if duration > 0 else audioPosition
+        offset = self.mediaPlayer.position() - target
+        if duration > 0 and abs(offset) > duration / 2:
+            offset -= duration if offset > 0 else -duration
+        settling = now - self.lastSeekAt < SEEK_SETTLE_SECONDS
+        if audioJumped or (abs(offset) > (HARD_SEEK_MS if audioPlaying else 300) and not settling):
             self.lastSeekAt = now
             self.loadedAt = max(self.loadedAt, now)
             self.mediaPlayer.setPosition(target)
+            offset = 0
+        rate = baseRate
+        if audioPlaying and not settling and abs(offset) > NUDGE_DEADBAND_MS:
+            rate = baseRate * (1 - max(-NUDGE_MAX, min(NUDGE_MAX, offset / 4000)))
+        if abs(self.mediaPlayer.playbackRate() - rate) > 0.015 or (rate == baseRate and self.mediaPlayer.playbackRate() != baseRate):
+            self.mediaPlayer.setPlaybackRate(rate)
         if audioPlaying:
             self._checkStall()
             if self.failed:
