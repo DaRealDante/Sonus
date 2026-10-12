@@ -1,4 +1,4 @@
-# Sonus v1.0.8
+# Sonus v1.0.9
 
 
 ## Installare / aggiornare (tu)
@@ -60,6 +60,11 @@ Il motore YouTube (yt-dlp) si aggiorna da solo una volta al giorno: non serve ri
 - Impostazioni → **"Non scaricare: aggiungi le canzoni solo in streaming"**: il bottone Scarica diventa *Aggiungi* (vale anche per playlist YouTube e Spotify)
 - Le canzoni in streaming hanno "Streaming ·" sotto il titolo. Menu → *Scarica sul PC*; al contrario, su una canzone scaricata *Solo streaming (elimina il file)*
 - Taglia audio ed "Esporta con effetti" richiedono il file: scarica prima la canzone
+
+## Sonus 1.0.9
+- **"Sign in to confirm you're not a bot"**: Sonus chiede le canzoni a YouTube sempre con IPv4 (YouTube si fida meno di IPv6) e, se YouTube fa comunque il controllo, riprova da solo come altre app di YouTube per 30 minuti. Il messaggio ora è in italiano
+- Se Sonus si chiude da solo, nel log viene scritto dove (per capire il crash)
+- Video: correzioni di velocità più rare e leggere
 
 ## Sonus 1.0.8
 - Fix video che a volte non partiva (YouTube rispondeva "403"): ora il video viene chiesto con gli stessi dati che vuole YouTube

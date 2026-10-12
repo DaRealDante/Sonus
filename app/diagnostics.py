@@ -67,6 +67,13 @@ def install(dataDir):
         logFile = None
     sys.stdout = _Tee(sys.stdout, logFile)
     sys.stderr = _Tee(sys.stderr, logFile)
+    if logFile is not None:
+        try:
+            # If the app closes by itself (a crash inside Qt/ffmpeg), where it was goes to log.txt
+            import faulthandler
+            faulthandler.enable(file=logFile, all_threads=True)
+        except Exception:
+            pass
     return path
 
 

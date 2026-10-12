@@ -27,12 +27,69 @@ class _YoutubeLog:
         print(f"[yt-dlp] ERRORE {str(message)[:300]}")
 
 
+# YouTube sometimes answers "Sign in to confirm you're not a bot" (it trusts IPv6 and some connections less):
+# yt-dlp always uses IPv4, and after that answer it asks as other YouTube apps for a while.
+BOT_CHECK_SECONDS = 30 * 60
+BOT_CHECK_CLIENTS = ["tv", "web_safari", "web_embedded", "mweb"]
+_botCheckUntil = 0.0
+_ipv4Works = True
+
+
+def isBotCheck(message):
+    text = str(message or "").lower()
+    return "not a bot" in text or "sign in to confirm" in text
+
+
+def _noteBotCheck():
+    global _botCheckUntil
+    if time.time() >= _botCheckUntil:
+        print("[Stream] YouTube chiede di confermare che non sei un bot: provo in un altro modo")
+    _botCheckUntil = time.time() + BOT_CHECK_SECONDS
+
+
+def _noIpv4(message):
+    text = str(message or "").lower()
+    return any(part in text for part in ("network is unreachable", "no route to host", "address family", "cannot assign requested"))
+
+
 def _baseOptions():
     options = {"quiet": True, "no_warnings": False, "noprogress": True, "ignoreerrors": False, "logger": _YoutubeLog()}
     denoPath = denoExe()
     if denoPath:
         options["js_runtimes"] = {"deno": {"path": denoPath}}
+    if _ipv4Works:
+        options["source_address"] = "0.0.0.0"
+    if time.time() < _botCheckUntil:
+        options["extractor_args"] = {"youtube": {"player_client": list(BOT_CHECK_CLIENTS)}}
     return options
+
+
+def _runYoutube(options, target, download):
+    """One yt-dlp call with the options of the moment (IPv4, bot check), so a retry uses the new ones."""
+    import yt_dlp
+    fresh = {key: value for key, value in options.items() if key not in ("source_address", "extractor_args")}
+    fresh.update({key: value for key, value in _baseOptions().items() if key in ("source_address", "extractor_args")})
+    with yt_dlp.YoutubeDL(fresh) as youtube:
+        return youtube.extract_info(target, download=download)
+
+
+def _withRetry(run):
+    """Runs a yt-dlp call; if YouTube answers with its bot check (or IPv4 is missing) it tries once more."""
+    global _ipv4Works
+    try:
+        return run()
+    except Exception as error:
+        if isBotCheck(error) and time.time() >= _botCheckUntil:
+            _noteBotCheck()
+        elif _ipv4Works and _noIpv4(error):
+            print("[Stream] IPv4 non disponibile, uso la connessione normale")
+            _ipv4Works = False
+        else:
+            if isBotCheck(error):
+                _noteBotCheck()
+            raise
+        _threadLocal.youtube = None
+        return run()
 
 
 def isUrl(text):
@@ -66,19 +123,17 @@ def _normalizeEntry(entry):
 
 
 def searchYoutube(query, maxResults=25):
-    import yt_dlp
     options = _baseOptions()
     options["extract_flat"] = "in_playlist"
-    with yt_dlp.YoutubeDL(options) as youtube:
-        if isUrl(query):
-            info = youtube.extract_info(query.strip(), download=False)
-            if info.get("_type") == "playlist" or info.get("entries"):
-                entries = [_normalizeEntry(entry) for entry in (info.get("entries") or []) if entry]
-                return {"playlistTitle": info.get("title") or "Playlist importata", "entries": entries}
-            return {"playlistTitle": None, "entries": [_normalizeEntry(info)]}
-        info = youtube.extract_info(f"ytsearch{maxResults}:{query}", download=False)
-        entries = [_normalizeEntry(entry) for entry in (info.get("entries") or []) if entry and entry.get("id")]
-        return {"playlistTitle": None, "entries": entries}
+    if isUrl(query):
+        info = _withRetry(lambda: _runYoutube(options, query.strip(), False))
+        if info.get("_type") == "playlist" or info.get("entries"):
+            entries = [_normalizeEntry(entry) for entry in (info.get("entries") or []) if entry]
+            return {"playlistTitle": info.get("title") or "Playlist importata", "entries": entries}
+        return {"playlistTitle": None, "entries": [_normalizeEntry(info)]}
+    info = _withRetry(lambda: _runYoutube(options, f"ytsearch{maxResults}:{query}", False))
+    entries = [_normalizeEntry(entry) for entry in (info.get("entries") or []) if entry and entry.get("id")]
+    return {"playlistTitle": None, "entries": entries}
 
 
 STREAM_CACHE_SECONDS = 4 * 3600
@@ -151,21 +206,27 @@ def _youtube():
     """One yt-dlp per worker thread, kept alive: YouTube's player and its solved challenges stay in memory,
     so after the first song the next ones are found much faster."""
     import yt_dlp
+    mode = (time.time() < _botCheckUntil, _ipv4Works)
     instance = getattr(_threadLocal, "youtube", None)
-    if instance is None:
+    if instance is None or getattr(_threadLocal, "mode", None) != mode:
         options = _baseOptions()
         options.update({"format": "bestaudio[ext=m4a]/bestaudio/best", "noplaylist": True})
         instance = yt_dlp.YoutubeDL(options)
         _threadLocal.youtube = instance
+        _threadLocal.mode = mode
     return instance
 
 
-def _extract(target):
+def _extractOnce(target):
     try:
         return _youtube().extract_info(target, download=False)
     except Exception:
         _threadLocal.youtube = None
         raise
+
+
+def _extract(target):
+    return _withRetry(lambda: _extractOnce(target))
 
 
 def _resolveStreamLocked(target, useCache):
@@ -227,15 +288,13 @@ def videoHeaders(url):
 
 def resolveVideoStream(target, height=720):
     """Direct URL of the song's video (no audio needed: the app plays it muted) at the chosen quality."""
-    import yt_dlp
     options = _baseOptions()
     options.update({
         "format": (f"bestvideo[height<={height}][ext=mp4][vcodec^=avc1]/bestvideo[height<={height}][ext=mp4]/"
                    f"best[height<={height}][ext=mp4]/bestvideo[height<={height}]/best[height<={height}]/best"),
         "noplaylist": True,
     })
-    with yt_dlp.YoutubeDL(options) as youtube:
-        info = youtube.extract_info(target, download=False)
+    info = _withRetry(lambda: _runYoutube(options, target, False))
     if info.get("entries") is not None:
         entries = [entry for entry in (info.get("entries") or []) if entry]
         if not entries:
@@ -257,7 +316,6 @@ def resolveVideoStream(target, height=720):
 def downloadTempAudio(target):
     """Last resort when streaming is refused: yt-dlp downloads the audio to a temporary cache (not to the library)."""
     import hashlib
-    import yt_dlp
     cacheDir = os.path.join(TEMP_DIR, "stream_cache")
     os.makedirs(cacheDir, exist_ok=True)
     baseName = hashlib.sha1(target.encode("utf-8")).hexdigest()[:16]
@@ -267,8 +325,7 @@ def downloadTempAudio(target):
     options = _baseOptions()
     options.update({"format": "bestaudio[ext=m4a]/bestaudio/best", "noplaylist": True,
                     "outtmpl": os.path.join(cacheDir, baseName + ".%(ext)s")})
-    with yt_dlp.YoutubeDL(options) as youtube:
-        youtube.extract_info(target, download=True)
+    _withRetry(lambda: _runYoutube(options, target, True))
     files = [path for path in glob.glob(os.path.join(cacheDir, baseName + ".*")) if not path.endswith(".part")]
     if not files:
         raise RuntimeError("download temporaneo fallito")
@@ -360,7 +417,6 @@ def _squareCover(imageBytes):
 
 
 def downloadAudio(entry, musicDir, quality="192", progressCallback=None):
-    import yt_dlp
     report = progressCallback or (lambda value: None)
     spotifyInfo = entry.get("spotify")
     if spotifyInfo and not entry.get("url"):
@@ -386,8 +442,7 @@ def downloadAudio(entry, musicDir, quality="192", progressCallback=None):
         "progress_hooks": [hook],
     })
     report({"stage": "download", "percent": 0})
-    with yt_dlp.YoutubeDL(options) as youtube:
-        info = youtube.extract_info(entry["url"], download=True)
+    info = _withRetry(lambda: _runYoutube(options, entry["url"], True))
     tempFiles = [path for path in glob.glob(os.path.join(TEMP_DIR, f"dl_{downloadId}.*")) if not path.endswith(".part")]
     if not tempFiles:
         raise RuntimeError("Download fallito: file non trovato")
@@ -465,7 +520,6 @@ def videosDir(musicDir):
 
 
 def downloadVideo(url, musicDir, baseName, quality="720", progressCallback=None):
-    import yt_dlp
     report = progressCallback or (lambda value: None)
     height = int(quality or 720)
     targetFolder = videosDir(musicDir)
@@ -487,8 +541,7 @@ def downloadVideo(url, musicDir, baseName, quality="720", progressCallback=None)
         "progress_hooks": [hook],
     })
     report({"stage": "video", "percent": 0})
-    with yt_dlp.YoutubeDL(options) as youtube:
-        info = youtube.extract_info(url, download=True)
+    info = _withRetry(lambda: _runYoutube(options, url, True))
     candidates = [path for path in glob.glob(glob.escape(outputBase) + ".*") if not path.endswith(".part")]
     if not candidates:
         raise RuntimeError("Download del video fallito")

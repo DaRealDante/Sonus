@@ -15,8 +15,9 @@ FIRST_FRAME_SECONDS = 12
 HARD_SEEK_MS = 2500
 AUDIO_JUMP_MS = 1500
 SEEK_SETTLE_SECONDS = 3
-NUDGE_DEADBAND_MS = 120
-NUDGE_MAX = 0.12
+NUDGE_DEADBAND_MS = 150
+NUDGE_STEPS = (0.92, 0.96, 1.0, 1.04, 1.08)
+RATE_CHANGE_SECONDS = 1.0
 
 
 def isRemote(path):
@@ -50,6 +51,7 @@ class VideoController(QObject):
         self.retried = False
         self.audioWasPlaying = False
         self.lastAudio = None
+        self.lastRateAt = 0.0
         self.syncTimer = QTimer(self)
         self.syncTimer.setInterval(200)
         self.syncTimer.timeout.connect(self.sync)
@@ -173,10 +175,14 @@ class VideoController(QObject):
             self.loadedAt = max(self.loadedAt, now)
             self.mediaPlayer.setPosition(target)
             offset = 0
-        rate = baseRate
+        step = 1.0
         if audioPlaying and not settling and abs(offset) > NUDGE_DEADBAND_MS:
-            rate = baseRate * (1 - max(-NUDGE_MAX, min(NUDGE_MAX, offset / 4000)))
-        if abs(self.mediaPlayer.playbackRate() - rate) > 0.015 or (rate == baseRate and self.mediaPlayer.playbackRate() != baseRate):
+            wanted = 1 - offset / 4000
+            step = min(NUDGE_STEPS, key=lambda value: abs(value - wanted))
+        rate = round(baseRate * step, 3)
+        # Few, fixed speed changes (at most one a second): every change makes the video player work
+        if abs(self.mediaPlayer.playbackRate() - rate) > 0.001 and (now - self.lastRateAt >= RATE_CHANGE_SECONDS or step == 1.0):
+            self.lastRateAt = now
             self.mediaPlayer.setPlaybackRate(rate)
         if audioPlaying:
             self._checkStall()

@@ -346,3 +346,25 @@ def test_stalledFirstRequestIsRetriedQuickly(application, rangeServer):
     assert waitFor(application, lambda: engine.decodedFrames > 0, timeout=15)
     assert time.time() - started < 9
     engine.shutdown()
+
+
+def test_botCheckRetriesAnotherWay(monkeypatch):
+    from app import downloader
+    monkeypatch.setattr(downloader, "_botCheckUntil", 0.0)
+    calls = []
+
+    def fakeRun(options, target, download):
+        fresh = {key: value for key, value in options.items() if key not in ("source_address", "extractor_args")}
+        fresh.update({key: value for key, value in downloader._baseOptions().items() if key in ("source_address", "extractor_args")})
+        calls.append(fresh)
+        if len(calls) == 1:
+            raise RuntimeError("ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies-from-browser")
+        return {"url": "https://x.googlevideo.com/v", "duration": 10}
+
+    monkeypatch.setattr(downloader, "_runYoutube", fakeRun)
+    info = downloader._withRetry(lambda: downloader._runYoutube({"format": "best"}, "https://youtu.be/abcdefghijk", False))
+    assert info["url"].startswith("https://")
+    assert calls[0].get("source_address") == "0.0.0.0" and "extractor_args" not in calls[0]
+    assert calls[1]["extractor_args"]["youtube"]["player_client"] == downloader.BOT_CHECK_CLIENTS
+    from app.player import _shortError
+    assert "anti-bot" in _shortError("Sign in to confirm you're not a bot")

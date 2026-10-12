@@ -16,6 +16,9 @@ def _defaultStreamResolver(target, useCache=True):
 
 
 def _shortError(message):
+    lowered = str(message or "").lower()
+    if "not a bot" in lowered or "sign in to confirm" in lowered:
+        return "YouTube ha bloccato per un po' la tua connessione (controllo anti-bot), riprova tra qualche minuto"
     text = re.sub(r"https?://\S+", "", str(message or ""))
     text = re.sub(r"^\s*ERROR:\s*", "", text.strip().splitlines()[0] if text.strip() else "")
     text = re.sub(r"\s*\(caused by.*$", "", text)
