@@ -758,6 +758,7 @@ class AudioEngine(QObject):
         self._closeStream()
         try:
             import sounddevice
+            from scipy.signal import sosfilt
             self.stream = sounddevice.OutputStream(
                 samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32", blocksize=BLOCK_SIZE,
                 latency=OUTPUT_LATENCY, callback=self._callback, finished_callback=self._onStreamFinished,
