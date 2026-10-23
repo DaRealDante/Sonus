@@ -4,7 +4,7 @@ import shutil
 import sys
 
 APP_NAME = "Sonus"
-VERSION = "1.0.10"
+VERSION = "1.0.11"
 DISCORD_CLIENT_ID = ""  # ID dell'applicazione "Sonus" sul Discord Developer Portal
 UPDATE_REPO = "DaRealDante/Sonus"  # "utente/repository" su GitHub
 # Server privato di Sonus (EMQX Serverless): stanze e playlist condivise passano solo da qui
