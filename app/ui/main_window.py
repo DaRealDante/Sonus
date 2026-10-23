@@ -226,6 +226,8 @@ class MainWindow(QMainWindow):
         self.playerBar.openEqualizer.connect(lambda: self.navigate("equalizer"))
         self.playerBar.openNowPlaying.connect(lambda: self.navigate("nowplaying"))
         self.playerBar.ambientModeChosen.connect(self.setAmbientMode)
+        self.videoController.tintChanged.connect(self.playerBar.setVideoTint)
+        self.videoController.tintChanged.connect(self.nowPlayingPage.setVideoTint)
         self.effectsPopup = EffectsPopup(self)
         self.effectsPopup.effectsChanged.connect(self._onEffectsChanged)
         self.effectsPopup.exportRequested.connect(self.exportWithEffects)

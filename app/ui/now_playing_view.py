@@ -14,7 +14,7 @@ from ..lyrics import parseSynced
 from . import theme
 from .player_bar import ClickSlider
 from .video_controller import FrameView, coverImage, drawCover
-from .effects import ColorFader, Visualizer
+from .effects import ColorFader, Visualizer, tintOverride
 from .views import ElidedLabel, Page, _iconButton, _label
 
 
@@ -540,6 +540,7 @@ class NowPlayingView(Page):
         layout.addWidget(self.visualizer)
         self.window.player.playingChanged.connect(lambda playing: self.visualizer.refreshRunning())
         self.backgroundFader = ColorFader(self.content.setColor, self)
+        self.videoColor = None
 
         self.syncTimer = QTimer(self)
         self.syncTimer.setInterval(200)
@@ -601,8 +602,14 @@ class NowPlayingView(Page):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._updateCover)
 
+    def setVideoTint(self, color):
+        self.videoColor = color
+        if self.song and settings.get("fxCoverColors"):
+            self._setBackground(self.song.get("cover"))
+
     def _setBackground(self, coverPath):
-        self.backgroundColor = dominantColor(coverPath)
+        override = tintOverride(self.videoColor)
+        self.backgroundColor = override if override is not None else dominantColor(coverPath)
         if settings.get("fxCoverColors"):
             self.backgroundFader.fadeTo(self.backgroundColor)
         else:
@@ -612,6 +619,8 @@ class NowPlayingView(Page):
     def applyEffectSettings(self):
         self.visualizer.setVisible(bool(settings.get("fxVisualizer")))
         self.visualizer.refreshRunning()
+        if self.song:
+            self._setBackground(self.song.get("cover"))
 
     def _loadLyrics(self):
         song = self.song

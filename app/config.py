@@ -94,6 +94,8 @@ DEFAULT_SETTINGS = {
     "discordClientId": "",
     "fxTransitions": True,
     "fxCoverColors": True,
+    "songColorSource": "cover",
+    "songColorCustom": "#1ED760",
     "fxVisualizer": True,
     "fxMicro": True,
     "fxSongFade": True,

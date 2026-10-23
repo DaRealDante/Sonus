@@ -672,7 +672,7 @@ class SettingsDialog(QDialog):
         column.setSpacing(10)
         self.effectChecks = {}
         for key, text in (("fxTransitions", "Transizioni: pagine che sfumano, popup morbidi, card che si illuminano, bottoni che rimbalzano"),
-                          ("fxCoverColors", "Colori dalla copertina: la barra e \"In riproduzione\" cambiano colore con la canzone"),
+                          ("fxCoverColors", "Colori della canzone: la barra e \"In riproduzione\" cambiano colore con la canzone"),
                           ("fxVisualizer", "Visualizer: barre che si muovono a ritmo"),
                           ("fxMicro", "Micro-effetti: cuore che esplode al like, copertina che pulsa sui bassi"),
                           ("fxSongFade", "Dissolvenza tra canzoni (fade-in all'inizio, fade-out alla fine)")):
@@ -680,8 +680,43 @@ class SettingsDialog(QDialog):
             check.setChecked(bool(settings.get(key)))
             self.effectChecks[key] = check
             column.addWidget(check)
+            if key == "fxCoverColors":
+                column.addLayout(self._buildSongColorRow())
         column.addStretch()
         return page
+
+    def _buildSongColorRow(self):
+        row = QHBoxLayout()
+        row.setContentsMargins(24, 0, 0, 0)
+        row.addWidget(QLabel("Prendi i colori da:"))
+        self.songColorCombo = QComboBox()
+        for value, text in (("cover", "Copertina"), ("custom", "Colore scelto da me"), ("video", "Video")):
+            self.songColorCombo.addItem(text, value)
+        self.songColorCombo.setCurrentIndex(max(0, self.songColorCombo.findData(settings.get("songColorSource"))))
+        self.chosenSongColor = settings.get("songColorCustom") or "#1ED760"
+        self.songColorButton = QPushButton()
+        self.songColorButton.setFixedSize(120, 30)
+        self.songColorButton.clicked.connect(self._pickSongColor)
+        self.songColorCombo.currentIndexChanged.connect(self._refreshSongColorButton)
+        row.addWidget(self.songColorCombo)
+        row.addWidget(self.songColorButton)
+        row.addStretch()
+        self._refreshSongColorButton()
+        return row
+
+    def _refreshSongColorButton(self):
+        color = QColor(self.chosenSongColor)
+        textColor = "#000000" if color.lightnessF() > 0.55 else "#FFFFFF"
+        self.songColorButton.setText(color.name().upper())
+        self.songColorButton.setStyleSheet(f"QPushButton {{ background: {color.name()}; color: {textColor}; border: 1px solid #555; border-radius: 6px; }}")
+        self.songColorButton.setVisible(self.songColorCombo.currentData() == "custom")
+
+    def _pickSongColor(self):
+        from PySide6.QtWidgets import QColorDialog
+        color = QColorDialog.getColor(QColor(self.chosenSongColor), self, "Scegli un colore")
+        if color.isValid():
+            self.chosenSongColor = color.name().upper()
+            self._refreshSongColorButton()
 
     def _editProfile(self):
         from .together_popup import ProfileDialog
@@ -703,6 +738,8 @@ class SettingsDialog(QDialog):
         settings.set("streamVideo", self.streamVideoCheck.isChecked())
         for key, check in self.effectChecks.items():
             settings.set(key, check.isChecked())
+        settings.set("songColorSource", self.songColorCombo.currentData())
+        settings.set("songColorCustom", self.chosenSongColor)
         colorsChanged = (settings.get("themeColors") or {}) != self.chosenColors
         settings.set("themeColors", dict(self.chosenColors))
         self.restartForColors = colorsChanged

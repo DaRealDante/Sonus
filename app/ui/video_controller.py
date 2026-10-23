@@ -7,6 +7,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import QWidget
 
 from .. import video_proxy
+from ..config import settings
+from .effects import dominantColorOfImage
 
 STALL_SECONDS = 4
 FIRST_FRAME_SECONDS = 12
@@ -29,6 +31,7 @@ class VideoController(QObject):
 
     frameReady = Signal()
     stateChanged = Signal()
+    tintChanged = Signal(object)
 
     def __init__(self, player, parent=None):
         super().__init__(parent)
@@ -55,6 +58,18 @@ class VideoController(QObject):
         self.syncTimer = QTimer(self)
         self.syncTimer.setInterval(200)
         self.syncTimer.timeout.connect(self.sync)
+        self.videoTint = None
+        self.tintTimer = QTimer(self)
+        self.tintTimer.setInterval(1000)
+        self.tintTimer.timeout.connect(self._sampleTint)
+        self.tintTimer.start()
+
+    def _sampleTint(self):
+        wanted = settings.get("songColorSource") == "video" and self.hasFrames()
+        color = dominantColorOfImage(self.currentImage) if wanted else None
+        if color != self.videoTint:
+            self.videoTint = color
+            self.tintChanged.emit(color)
 
     # ---------- clients ----------
     def request(self, client, path):

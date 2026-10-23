@@ -37,3 +37,21 @@ def test_restartLaunchesNewInstance(monkeypatch):
     window = MainWindow()
     window.restartApp()
     assert launched and launched[0][-1] == "--restarted"
+
+
+def test_songColorSource(monkeypatch):
+    from PySide6.QtGui import QColor
+    from app.config import settings
+    from app.ui.effects import tintOverride
+    settings.set("songColorSource", "cover")
+    assert tintOverride(QColor("#FF0000")) is None
+    settings.set("songColorSource", "video")
+    assert tintOverride(QColor("#FF0000")).name() == "#ff0000"
+    assert tintOverride(None) is None
+    settings.set("songColorSource", "custom")
+    settings.set("songColorCustom", "#3D91F4")
+    assert tintOverride(QColor("#FF0000")).name() != "#ff0000"
+    settings.set("songColorCustom", "non-un-colore")
+    assert tintOverride() is None
+    settings.set("songColorSource", "cover")
+    settings.set("songColorCustom", "#1ED760")

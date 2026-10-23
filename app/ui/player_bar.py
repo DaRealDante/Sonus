@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 from ..config import settings
 from ..player import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE
 from . import theme
-from .effects import ColorFader, Visualizer, bounce, dominantColor, heartBurst
+from .effects import ColorFader, Visualizer, bounce, dominantColor, heartBurst, tintOverride
 
 
 class ClickSlider(QSlider):
@@ -156,6 +156,7 @@ class PlayerBar(QFrame):
         leftLayout.addWidget(self.miniVisualizer)
         leftLayout.addWidget(self.favoriteButton)
         self.tintColor = None
+        self.videoColor = None
         self.coverGlow = 0.0
         self.tintFader = ColorFader(self._setTint, self)
         self.favoriteState = False
@@ -378,7 +379,14 @@ class PlayerBar(QFrame):
         if not settings.get("fxCoverColors"):
             self.tintFader.fadeTo(None)
             return
-        self.tintFader.fadeTo(dominantColor(coverPath))
+        override = tintOverride(self.videoColor)
+        self.tintFader.fadeTo(override if override is not None else dominantColor(coverPath))
+
+    def setVideoTint(self, color):
+        self.videoColor = color
+        song = self.player.currentSong()
+        if song:
+            self.setCoverTint(song.get("cover"))
 
     def applyEffectSettings(self):
         self.miniVisualizer.setVisible(bool(settings.get("fxVisualizer")))

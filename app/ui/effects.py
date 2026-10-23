@@ -134,6 +134,23 @@ def dominantColor(coverPath):
     image = QImage(coverPath) if coverPath else QImage()
     if image.isNull():
         return None
+    return dominantColorOfImage(image)
+
+
+def tintOverride(videoColor=None):
+    """The colour chosen by the user (or taken from the video) instead of the cover's; None = use the cover."""
+    source = settings.get("songColorSource")
+    if source == "custom":
+        custom = QColor(str(settings.get("songColorCustom") or ""))
+        if custom.isValid():
+            hue, saturation, value, _ = custom.getHsvF()
+            return QColor.fromHsvF(max(0.0, hue), saturation, min(0.8, max(0.32, value)))
+    elif source == "video":
+        return videoColor
+    return None
+
+
+def dominantColorOfImage(image):
     image = image.scaled(32, 32, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).convertToFormat(QImage.Format_RGB32)
     weightedRed = weightedGreen = weightedBlue = totalWeight = 0.0
     plainRed = plainGreen = plainBlue = 0.0
