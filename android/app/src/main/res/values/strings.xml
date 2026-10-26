@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sonus</string>
+    <string name="playback_channel">Riproduzione musicale</string>
+    <string name="playback_channel_description">Comandi musicali e ascolto a schermo spento</string>
+    <string name="starting_playback">Preparazione audio…</string>
+    <string name="play">Riproduci</string>
+    <string name="pause">Pausa</string>
+    <string name="previous">Precedente</string>
+    <string name="next">Successivo</string>
+    <string name="stop">Ferma</string>
+</resources>
