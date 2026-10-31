@@ -101,6 +101,53 @@ def cutAudio(inputPath, outputPath, startMs, endMs, removeSelection=False, fadeI
     return outputPath
 
 
+def mixLengthMs(clips):
+    """Length of a mix: the end of the last clip."""
+    return max((int(clip["posMs"]) + int(clip["endMs"]) - int(clip["startMs"]) for clip in clips), default=0)
+
+
+def renderMix(clips, outputPath, quality="192", rangeStartMs=0, rangeEndMs=None):
+    """Mixes songs into one file. Each clip is a dict: path, startMs/endMs (part of the song), posMs (place in the
+    mix), fadeInMs, fadeOutMs, volume (percent). Clips that overlap play together. A limiter stops clipping.
+    rangeStartMs/rangeEndMs render only a part of the mix (used for the preview: same sound as the final file)."""
+    totalMs = mixLengthMs(clips)
+    startMs = max(0, int(rangeStartMs))
+    endMs = totalMs if rangeEndMs is None else min(totalMs, int(rangeEndMs))
+    chosen = [clip for clip in clips
+              if int(clip["posMs"]) < endMs and int(clip["posMs"]) + int(clip["endMs"]) - int(clip["startMs"]) > startMs]
+    if endMs - startMs < 50 or not chosen:
+        raise RuntimeError("Il mix è vuoto")
+    arguments, parts = [], []
+    for index, clip in enumerate(chosen):
+        lengthMs = int(clip["endMs"]) - int(clip["startMs"])
+        fadeInMs = min(max(0, int(clip.get("fadeInMs") or 0)), lengthMs)
+        fadeOutMs = min(max(0, int(clip.get("fadeOutMs") or 0)), lengthMs)
+        positionMs = max(0, int(clip["posMs"]))
+        chain = [
+            f"[{index}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo",
+            f"atrim=start={int(clip['startMs']) / 1000.0:.3f}:end={int(clip['endMs']) / 1000.0:.3f}",
+            "asetpts=PTS-STARTPTS",
+            f"volume={max(0, float(clip.get('volume', 100))) / 100.0:.3f}",
+        ]
+        if fadeInMs:
+            chain.append(f"afade=t=in:st=0:d={fadeInMs / 1000.0:.3f}:curve=qsin")
+        if fadeOutMs:
+            chain.append(f"afade=t=out:st={(lengthMs - fadeOutMs) / 1000.0:.3f}:d={fadeOutMs / 1000.0:.3f}:curve=qsin")
+        if positionMs:
+            chain.append(f"adelay={positionMs}|{positionMs}")
+        # Every clip lasts the whole mix, so amix keeps one fixed gain (1/N) that "volume=N" gives back
+        chain.append(f"apad=whole_dur={totalMs / 1000.0:.3f}")
+        parts.append(",".join(chain) + f"[c{index}]")
+        arguments += ["-i", clip["path"]]
+    count = len(chosen)
+    joined = "".join(f"[c{index}]" for index in range(count))
+    mixed = f"{joined}amix=inputs={count}:duration=longest:dropout_transition=0,volume={count}," if count > 1 else f"{joined}"
+    parts.append(f"{mixed}alimiter=limit=0.97:level=0,atrim=start={startMs / 1000.0:.3f}:end={endMs / 1000.0:.3f},"
+                 f"asetpts=PTS-STARTPTS[out]")
+    runFfmpeg([*arguments, "-filter_complex", ";".join(parts), "-map", "[out]", *_encodeArgs(outputPath, quality), outputPath])
+    return outputPath
+
+
 def convertToMp3(inputPath, outputPath, quality="192"):
     runFfmpeg(["-i", inputPath, "-vn", "-map_metadata", "-1", "-c:a", "libmp3lame", "-b:a", f"{quality}k", outputPath])
     return outputPath

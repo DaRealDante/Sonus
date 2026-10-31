@@ -31,6 +31,7 @@ from .dialogs import CutDialog, LyricsEditDialog, LyricsSearchDialog, PlaylistDi
 from .now_playing_view import NowPlayingView
 from .effects_popup import DEFAULT_EFFECTS, EffectsPopup
 from .video_controller import BackdropWidget, VideoController
+from .mix_dialog import MixDialog
 from .now_playing import NowPlayingPanel
 from .player_bar import PlayerBar
 from .song_table import SONG_MIME
@@ -617,6 +618,8 @@ class MainWindow(QMainWindow):
             menu.addAction(theme.icon("add"), "Salva nella libreria", lambda: self.unhideSongs(hiddenSongs))
         if streamSongs:
             menu.addAction(theme.icon("download"), "Scarica sul PC", lambda: self.downloadStreamSongs(streamSongs))
+        menu.addAction(theme.icon("music"), "Crea mix con queste canzoni..." if len(songs) > 1 else "Crea mix con questa canzone...",
+                       lambda: self.openMixDialog(songs))
         if single:
             menu.addAction(theme.icon("loop"), "Loop A-B...", lambda: self._openLoopFor(single))
             menu.addAction(theme.icon("cut"), "Taglia audio...", lambda: self.openCutDialog(single))
@@ -703,6 +706,44 @@ class MainWindow(QMainWindow):
             self.player.pause()
         dialog = CutDialog(self, song, self._onCutDone, initialSelection)
         dialog.exec()
+
+    # ---------- mix ----------
+    def openMixDialog(self, songs, index=0):
+        songs = [song for song in songs if song]
+        if not songs:
+            self.showStatus("Nessuna canzone selezionata")
+            return
+        # A streaming song is fetched first (temporarily), one after the other, then the editor opens
+        while index < len(songs) and not isStreamPath(songs[index].get("path")):
+            index += 1
+        if index < len(songs):
+            def onReady(local, position=index):
+                songs[position] = local
+                self.openMixDialog(songs, position + 1)
+            self.withLocalAudio(songs[index], onReady)
+            return
+        songs = [song for song in songs if os.path.isfile(song.get("path") or "")]
+        if not songs:
+            self.showStatus("File non trovato")
+            return
+        if self.player.isPlaying():
+            self.player.pause()
+        dialog = MixDialog(self, songs, self.database.allSongs, self._onMixDone)
+        dialog.exec()
+
+    def _onMixDone(self, songs, outputPath, title):
+        artists = []
+        for song in songs:
+            artist = (song.get("artist") or "").strip()
+            if artist and artist not in artists:
+                artists.append(artist)
+        artist = ", ".join(artists[:3])
+        cover = next((song.get("cover") for song in songs if song.get("cover")), None)
+        metadata.writeMp3Tags(outputPath, title, artist, "", cover)
+        duration = metadata.readTags(outputPath)["duration"]
+        self.database.addSong(outputPath, title, artist, "", duration, cover, "mix", None)
+        self.showStatus(f"Creato \"{title}\" nella libreria")
+        self.refreshCurrentPage()
 
     def _cutLyricsFields(self, source, cutOperation):
         """cutInfo + lyrics for a file cut from `source`, so the lyrics keep matching the audio."""
