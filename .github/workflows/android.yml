@@ -1,0 +1,83 @@
+name: Android — build e prove complete
+
+on:
+  push:
+    branches: [android]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Prepara test reali audio e MQTT
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y mosquitto ffmpeg
+          python -m pip install pytest numpy==1.23.3 scipy==1.8.1 Pillow==11.0.0 mutagen yt-dlp yt-dlp-ejs spotifyscraper 'paho-mqtt>=2,<3' certifi imageio-ffmpeg
+      - name: Genera lo stesso core incluso nell'APK
+        run: python android/tools/prepare_core.py --source . --output android/app/build/generated/python
+      - name: Test backend e protocolli ripetuti
+        env:
+          PYTHONPATH: android/app/src/main/python:android/app/build/generated/python
+        run: |
+          python -m pytest android/tests -q --junitxml=android/app/build/core-tests.xml
+          python -m pytest android/tests -q --basetemp=android/app/build/pytest-repeat
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-core-test-report
+          path: android/app/build/*tests.xml
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.10'
+      - name: Compila APK e controlla il codice Android
+        working-directory: android
+        env:
+          SONUS_BUILD_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: bash ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest
+      - name: Abilita accelerazione dell'emulatore nel runner temporaneo
+        run: sudo chown "$USER" /dev/kvm
+      - name: Prove su Android 15
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SONUS_BUILD_PYTHON: ${{ steps.python.outputs.python-path }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          working-directory: android
+          script: bash ./gradlew --no-daemon connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Sonus-Android-APK-e-test
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/connected_android_test_additional_output/

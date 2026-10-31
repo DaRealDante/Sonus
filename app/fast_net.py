@@ -209,10 +209,13 @@ class _SetupError(Exception):
     """The direct way could not even reach the server (DNS, connection, certificate)."""
 
 
-def _openDirect(url, headers, timeout, redirects):
+def _openDirect(url, headers, timeout, redirects, ipv4Only=False):
     parts = urllib.parse.urlsplit(url)
     try:
         addresses = resolveHost(parts.hostname)
+        if ipv4Only:
+            # A googlevideo link found over IPv4 works only from the same IPv4 address (IPv6 gives HTTP 403)
+            addresses = [address for address in addresses if ":" not in address] or addresses
         connection = _PinnedConnection(parts.hostname, parts.port or 443, addresses, timeout)
         connection.connect()
     except Exception as error:
@@ -227,21 +230,21 @@ def _openDirect(url, headers, timeout, redirects):
     if response.status in (301, 302, 303, 307, 308) and response.getheader("Location") and redirects > 0:
         location = urllib.parse.urljoin(url, response.getheader("Location"))
         connection.close()
-        return _openDirect(location, headers, timeout, redirects - 1)
+        return _openDirect(location, headers, timeout, redirects - 1, ipv4Only)
     if response.status >= 400:
         connection.close()
         raise urllib.error.HTTPError(url, response.status, response.reason, response.headers, None)
     return _Response(connection, response)
 
 
-def openUrl(url, headers=None, timeout=15):
+def openUrl(url, headers=None, timeout=15, ipv4Only=False):
     """Like urllib.request.urlopen for a GET, without waiting for a slow Windows DNS. Falls back to urllib
     (proxy, unusual networks) when the direct way does not work."""
     headers = dict(headers or {})
     headers.setdefault("User-Agent", "Mozilla/5.0")
     if urllib.parse.urlsplit(url).scheme == "https":
         try:
-            return _openDirect(url, headers, timeout, 4)
+            return _openDirect(url, headers, timeout, 4, ipv4Only)
         except _SetupError as error:
             print(f"[Rete] collegamento diretto non riuscito ({error}), uso quello di sistema")
     return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)

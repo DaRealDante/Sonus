@@ -31,13 +31,15 @@ def _download(url, headers, start, end, blocks, stop):
                 continue
         return False
 
+    from .downloader import usesIpv4
+    ipv4Only = usesIpv4()
     position = start
     total = None
     failures = 0
     while not stop.is_set() and (end is None or position <= end):
         last = position + CHUNK_BYTES - 1 if end is None else min(end, position + CHUNK_BYTES - 1)
         try:
-            response = fast_net.openUrl(url, {**headers, "Range": f"bytes={position}-{last}"}, timeout=RESPONSE_TIMEOUT)
+            response = fast_net.openUrl(url, {**headers, "Range": f"bytes={position}-{last}"}, timeout=RESPONSE_TIMEOUT, ipv4Only=ipv4Only)
         except urllib.error.HTTPError as error:
             if total is not None and error.code == 416:
                 break

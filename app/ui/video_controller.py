@@ -32,6 +32,7 @@ class VideoController(QObject):
     frameReady = Signal()
     stateChanged = Signal()
     tintChanged = Signal(object)
+    streamFailed = Signal(str)  # a streaming link that does not work (expired or refused): ask for a new one
 
     def __init__(self, player, parent=None):
         super().__init__(parent)
@@ -139,6 +140,11 @@ class VideoController(QObject):
         self.mediaPlayer.stop()
         self.stateChanged.emit()
         self.frameReady.emit()
+        self._reportFailure()
+
+    def _reportFailure(self):
+        if isRemote(self.currentPath):
+            self.streamFailed.emit(self.currentPath)
 
     def setSuspended(self, suspended):
         """Freezes the video (last frame stays) to free the CPU, e.g. while you play a game."""
@@ -231,9 +237,12 @@ class VideoController(QObject):
     def _onError(self, error, message):
         if error != QMediaPlayer.NoError:
             print(f"[Video] errore del video: {message}")
+            alreadyFailed = self.failed
             self.failed = True
             self.stateChanged.emit()
             self.frameReady.emit()
+            if not alreadyFailed:
+                self._reportFailure()
 
 
 def drawCover(painter, rect, image, fit=False):

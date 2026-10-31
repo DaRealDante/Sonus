@@ -281,6 +281,11 @@ STREAM_CACHE_FILES = 8
 _videoHeaders = {}
 
 
+def usesIpv4():
+    """True when yt-dlp finds the YouTube links over IPv4 (the links work only from that address)."""
+    return _ipv4Works
+
+
 def videoHeaders(url):
     """Headers YouTube wants with a video link (without them it can answer 403)."""
     return dict(_videoHeaders.get(url) or {})

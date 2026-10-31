@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self.downloads.videoDownloaded.connect(self._onVideoDownloaded)
         self.pendingOrder = {}
         self.videoStreams = {}
+        self.videoRetried = {}
         self.videoResolving = set()
         self.lyricsJobs = set()
         self.lyricsRetries = {}
@@ -137,6 +138,7 @@ class MainWindow(QMainWindow):
 
         self.videoController = VideoController(self.player, self)
         self.videoController.stateChanged.connect(self.updateAmbient)
+        self.videoController.streamFailed.connect(self._onVideoStreamFailed)
         self.ambientActive = False
         self.uiVisible = True
         self.enteredFullscreen = False
@@ -1272,7 +1274,7 @@ class MainWindow(QMainWindow):
             return None
         key = f"{settings.get('videoQuality')}:{target}"
         cached = self.videoStreams.get(key)
-        if cached and time.time() - cached[0] < (4 * 3600 if cached[1] else 600):
+        if cached and time.time() - cached[0] < (4 * 3600 if cached[1] else 30):
             return cached[1]
         if key not in self.videoResolving and self._activeForVideo():
             self.videoResolving.add(key)
@@ -1306,6 +1308,16 @@ class MainWindow(QMainWindow):
         if chosen > 0:
             return chosen
         return 25 if fullscreen else 12
+
+    def _onVideoStreamFailed(self, url):
+        """The saved streaming link does not work (expired or refused): forget it and find a new one, once."""
+        key = next((key for key, saved in self.videoStreams.items() if saved[1] == url), None)
+        if key is None or time.time() - self.videoRetried.get(key, 0) < 600:
+            return
+        self.videoRetried[key] = time.time()
+        self.videoStreams.pop(key, None)
+        print("[Video] il link del video non va: ne cerco uno nuovo")
+        QTimer.singleShot(0, self._refreshVideo)
 
     def _onVideoStreamResolved(self, key, url):
         self.videoResolving.discard(key)
