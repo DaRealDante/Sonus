@@ -1,2 +1,0 @@
--keep class it.sonus.mobile.PcmSink { *; }
--keep class it.sonus.mobile.SonusHost$Callback { *; }
