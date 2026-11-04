@@ -12,7 +12,7 @@ Saltato: Discord (`discord_presence.py`). Non servono su Android: tasti multimed
 | Fase | Contenuto | Moduli del PC |
 |---|---|---|
 | 0 (fatta) | Scheletro, tema/colori, navigazione, mini-player, APK creato da GitHub, aggiornamento automatico dell'app | `theme.py`, `config.py`, `app_updater.py` |
-| 1 | Database, importa file, riproduzione in background, coda/shuffle/repeat, Libreria, Preferiti, Recenti, Playlist, Home, Cerca locale, schermata In riproduzione, impostazioni e temi | `database.py`, `player.py`, `metadata.py`, `views.py`, `song_table.py`, `player_bar.py`, `now_playing*.py`, `dialogs.py` (Playlist, Info brano, Impostazioni) |
+| 1 (0.2.0, fatta) | Database, importa file, riproduzione in background, coda/shuffle/repeat, Libreria, Preferiti, Recenti, Playlist, Home, Cerca locale, schermata In riproduzione, impostazioni e temi | `database.py`, `player.py`, `metadata.py`, `views.py`, `song_table.py`, `player_bar.py`, `now_playing*.py`, `dialogs.py` (Playlist, Info brano, Impostazioni) |
 | 2 | YouTube: cerca, streaming, download, pagina Download, video (sfondo + pannello), qualità, Scopri, import Spotify | `downloader.py`, `fast_net.py`, `video_proxy.py`, `video_controller.py`, `discover*.py`, `spotify_import.py` |
 | 3 | Testi sincronizzati (+ modifica e ricerca), effetti (velocità, tono, riverbero, bassi), equalizzatore, visualizer, loop A-B, forma d'onda | `lyrics.py`, `audio_engine.py`, `effects*.py`, `equalizer_page.py`, `waveform.py` |
 | 4 | Taglia audio e Crea mix (con la timeline per il telefono) | `audio_tools.py`, `CutDialog`, `mix_dialog.py` |
@@ -23,3 +23,15 @@ Saltato: Discord (`discord_presence.py`). Non servono su Android: tasti multimed
 Barra in basso: **Home, Cerca, Scopri, Libreria** (Libreria contiene Brani, Preferiti, Recenti, Playlist, Download).
 Sopra la barra: il mini-player. Un tocco lo apre a schermo intero (**In riproduzione**: copertina/testi/video, coda, effetti, equalizzatore).
 Impostazioni e Insieme: icone in alto nella Home.
+
+## Stato della Fase 1 (versione 0.2.0)
+
+Fatto: database (stesse tabelle del PC), importa file e musica del telefono, riproduzione in background con notifica e schermata di blocco,
+coda con shuffle e ripeti come sul PC (provata qui con 8 controlli), Home, Cerca (libreria), Libreria (Brani, Preferiti, Recenti, Playlist),
+Playlist (crea, rinomina, elimina, aggiungi/rimuovi brani), Coda (sposta, rimuovi, svuota), In riproduzione, menu dei brani, modifica info,
+Impostazioni (temi colore, importazione, aggiornamenti).
+
+Ancora da fare (fasi dopo): ricerca e download da YouTube, Scopri vero, pagina Download, riordino delle playlist col trascinamento,
+testi, effetti, equalizzatore, loop, taglia e mix, Insieme, colori personalizzati.
+
+Grafica: stile "vetro" leggero (sfondo con luce colorata dal colore della copertina, pannelli trasparenti con bordo luminoso, barra fluttuante).

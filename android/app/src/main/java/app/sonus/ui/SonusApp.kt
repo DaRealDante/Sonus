@@ -1,130 +1,227 @@
 package app.sonus.ui
 
-import androidx.compose.foundation.background
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import app.sonus.ui.theme.LocalSonusColors
+import androidx.core.content.ContextCompat
+import app.sonus.core.Palette
+import app.sonus.data.AppPrefs
+import app.sonus.data.Song
+import app.sonus.data.SongImporter
+import app.sonus.playback.PlayerController
+import app.sonus.ui.components.AuroraBackground
+import app.sonus.ui.components.GlassNavBar
+import app.sonus.ui.components.MiniPlayer
+import app.sonus.ui.components.SongActionsSheet
+import app.sonus.ui.screens.DiscoverScreen
+import app.sonus.ui.screens.HomeScreen
+import app.sonus.ui.screens.LibraryScreen
+import app.sonus.ui.screens.NowPlayingScreen
+import app.sonus.ui.screens.PlaylistScreen
+import app.sonus.ui.screens.QueueScreen
+import app.sonus.ui.screens.SearchScreen
+import app.sonus.ui.screens.SettingsScreen
 import app.sonus.ui.theme.SonusTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The main places of the app (on PC they are the sidebar: Home, Cerca, Scopri, Libreria...). */
-enum class Tab(val label: String, val icon: ImageVector, val description: String) {
-    Home("Home", Icons.Filled.Home, "Brani recenti, più ascoltati e playlist"),
-    Search("Cerca", Icons.Filled.Search, "Cerca nella libreria e su YouTube"),
-    Discover("Scopri", Icons.Filled.Explore, "Nuova musica da scoprire"),
-    Library("Libreria", Icons.Filled.LibraryMusic, "Brani, preferiti, recenti, playlist e download"),
+enum class Tab(val label: String, val icon: ImageVector) {
+    Home("Home", Icons.Rounded.Home),
+    Search("Cerca", Icons.Rounded.Search),
+    Discover("Scopri", Icons.Rounded.Explore),
+    Library("Libreria", Icons.Rounded.LibraryMusic),
+}
+
+private sealed interface Route {
+    data class Root(val tab: Tab) : Route
+    data class PlaylistRoute(val id: Long) : Route
+    data object QueueRoute : Route
+    data object SettingsRoute : Route
 }
 
 @Composable
 fun SonusApp() {
-    SonusTheme {
-        SonusScaffold()
-        UpdatePrompt()
-    }
+    val preset = AppPrefs.themePreset
+    val palette = remember(preset) { Palette.resolve(Palette.PRESETS[preset]) }
+    SonusTheme(palette) { SonusRoot() }
 }
 
 @Composable
-private fun SonusScaffold() {
-    var tab by rememberSaveable { mutableStateOf(Tab.Home) }
-    val colors = LocalSonusColors.current
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            Column {
-                MiniPlayer()
-                NavigationBar(containerColor = colors.sidebar) {
-                    Tab.entries.forEach { item ->
-                        NavigationBarItem(
-                            selected = tab == item,
-                            onClick = { tab = item },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = colors.accent,
-                                selectedTextColor = colors.accent,
-                                indicatorColor = colors.accentDim,
-                                unselectedIconColor = colors.subtext,
-                                unselectedTextColor = colors.subtext,
-                            ),
-                        )
+private fun SonusRoot() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    // remember: a new lambda every time would make the whole app draw again
+    val status: (String) -> Unit = remember {
+        { text ->
+            scope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar(text)
+            }
+        }
+    }
+
+    val tabState = rememberSaveable { mutableStateOf(Tab.Home) }
+    val tab = tabState.value
+    val stack = remember { mutableStateListOf<Route>() }
+    var nowPlayingOpen by rememberSaveable { mutableStateOf(false) }
+    var sheetSong by remember { mutableStateOf<Song?>(null) }
+    var sheetEntry by remember { mutableStateOf<Long?>(null) }
+
+    val openActions: (Song, Long?) -> Unit = remember {
+        { song, entry ->
+            sheetSong = song
+            sheetEntry = entry
+        }
+    }
+
+    val navigator = remember {
+        object : Navigator {
+            override fun openPlaylist(id: Long) { nowPlayingOpen = false; stack.add(Route.PlaylistRoute(id)) }
+            override fun openQueue() { nowPlayingOpen = false; stack.add(Route.QueueRoute) }
+            override fun openSettings() { nowPlayingOpen = false; stack.add(Route.SettingsRoute) }
+            override fun openNowPlaying() { nowPlayingOpen = true }
+            override fun goTo(tab: Tab) { nowPlayingOpen = false; stack.clear(); tabState.value = tab }
+        }
+    }
+    // Permissions and file picker
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                val count = withContext(Dispatchers.IO) { SongImporter.importUris(context, uris, AppPrefs.copyImported) }
+                status(if (count > 0) "$count brani aggiunti" else "Nessun brano nuovo")
+            }
+        }
+    }
+    val runScan: () -> Unit = {
+        scope.launch {
+            status("Cerco la musica del telefono...")
+            val count = withContext(Dispatchers.IO) { SongImporter.scanDevice(context) }
+            status(if (count > 0) "$count brani aggiunti" else "Nessun brano nuovo")
+        }
+    }
+    val audioPermission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+    val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) runScan() else status("Serve il permesso per leggere la musica del telefono")
+    }
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val libraryActions = remember {
+        LibraryActions(
+            importFiles = { importLauncher.launch(arrayOf("audio/*")) },
+            scanDevice = {
+                if (ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED) runScan()
+                else scanLauncher.launch(audioPermission)
+            },
+        )
+    }
+
+    LaunchedEffect(PlayerController.errorMessage) {
+        PlayerController.errorMessage?.let {
+            status(it)
+            PlayerController.errorMessage = null
+        }
+    }
+
+    BackHandler(enabled = nowPlayingOpen) { nowPlayingOpen = false }
+    BackHandler(enabled = !nowPlayingOpen && stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomPadding = navInset + if (PlayerController.currentSong != null) 164.dp else 94.dp
+    val current: Route = stack.lastOrNull() ?: Route.Root(tab)
+    val pop = { stack.removeAt(stack.lastIndex); Unit }
+
+    CompositionLocalProvider(
+        LocalNavigator provides navigator,
+        LocalStatus provides status,
+        LocalOpenSongActions provides openActions,
+        LocalBottomPadding provides bottomPadding,
+        LocalLibraryActions provides libraryActions,
+    ) {
+        AuroraBackground {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                    Crossfade(targetState = current, label = "screen") { route ->
+                        when (route) {
+                            is Route.Root -> when (route.tab) {
+                                Tab.Home -> HomeScreen()
+                                Tab.Search -> SearchScreen()
+                                Tab.Discover -> DiscoverScreen()
+                                Tab.Library -> LibraryScreen()
+                            }
+                            is Route.PlaylistRoute -> PlaylistScreen(route.id, pop)
+                            Route.QueueRoute -> QueueScreen(pop)
+                            Route.SettingsRoute -> SettingsScreen(pop)
+                        }
                     }
                 }
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp).navigationBarsPadding().padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MiniPlayer(onOpen = { nowPlayingOpen = true })
+                    GlassNavBar(selected = (current as? Route.Root)?.tab ?: tab, onSelect = { navigator.goTo(it) })
+                }
+                SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomPadding))
+                AnimatedVisibility(
+                    visible = nowPlayingOpen,
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut(),
+                ) {
+                    NowPlayingScreen(onClose = { nowPlayingOpen = false })
+                }
+                sheetSong?.let { song -> SongActionsSheet(song, sheetEntry) { sheetSong = null; sheetEntry = null } }
+                UpdatePrompt()
             }
-        },
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            PlaceholderScreen(tab.label, tab.description)
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(title: String, description: String) {
-    val colors = LocalSonusColors.current
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = colors.text)
-        Text(description, style = MaterialTheme.typography.bodyMedium, color = colors.subtext, modifier = Modifier.padding(top = 8.dp))
-        Text("Fase 0: scheletro dell'app", style = MaterialTheme.typography.bodySmall, color = colors.muted, modifier = Modifier.padding(top = 16.dp))
-    }
-}
-
-/** The bar above the navigation: the song that plays now (empty for now). Tap = full "In riproduzione" screen later. */
-@Composable
-private fun MiniPlayer() {
-    val colors = LocalSonusColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth().height(64.dp).background(colors.elevated).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(colors.accentGlow),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.MusicNote, contentDescription = null, tint = colors.accent)
-        }
-        Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text("Nessuna canzone", color = colors.text, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text("Sonus", color = colors.subtext, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-        }
-        IconButton(onClick = {}, enabled = false) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = "Riproduci", tint = colors.muted)
         }
     }
 }
